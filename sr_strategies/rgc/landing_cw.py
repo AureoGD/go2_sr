@@ -1,0 +1,68 @@
+import numpy as np
+from sr_strategies.tsm.smooth_filter import SmoothFilter
+
+
+class LandingCW():
+
+    def __init__(self, **kwargs):
+        self.robot_states = kwargs.get('robot_states', [])
+
+        qr = np.array([[-0.25, 1.5, -2.0, -0.85, 0.85, -1.3, -0.25, 1.5, -2.2, 0.6, 3.75, -1.5]]).transpose()
+        landing_stage_1 = {'robot_states': self.robot_states, 'settling_time': 3, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_1 = SmoothFilter(**landing_stage_1)
+
+        qr = np.array([[-0.25, 1.5, -2.0, -0.85, 0.85, -1.3, -0.25, 1.5, -2.2, -0.9, 0.9, -1.5]]).transpose()
+        landing_stage_2 = {'robot_states': self.robot_states, 'settling_time': 2, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_2 = SmoothFilter(**landing_stage_2)
+
+        qr = np.array([[0.5, 1.5, -2.0, -0.85, 0.85, -2.0, 0.5, 1.5, -2.2, -0.9, 0.9, -2.0]]).transpose()
+        landing_stage_3 = {'robot_states': self.robot_states, 'settling_time': 0.5, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_3 = SmoothFilter(**landing_stage_3)
+
+        qr = np.array([[0.5, 1.5, -2.7, -0.85, 0.5, -1.7, 0.5, 1.5, -2.7, -0.9, 0.5, -1.7]]).transpose()
+        landing_stage_4 = {'robot_states': self.robot_states, 'settling_time': 0.5, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_4 = SmoothFilter(**landing_stage_4)
+
+        qr = np.array([[1.05, 1.5, -2.7, -0.85, 1.4, -2.7, 1.05, 1.5, -2.7, -0.9, 1.4, -2.7]]).transpose()
+        landing_stage_5 = {'robot_states': self.robot_states, 'settling_time': 0.5, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_5 = SmoothFilter(**landing_stage_5)
+
+        qr = np.array([[1.05, 1.5, -2.7, -0.85, 1.4, -2.7, 0, 1.55, -2.7, -0.9, 1.4, -2.7]]).transpose()
+        landing_stage_6 = {'robot_states': self.robot_states, 'settling_time': 0.5, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_6 = SmoothFilter(**landing_stage_6)
+
+        qr = np.array([[0, 1.5, -2.7, -0.85, 1.4, -2.7, 0, 1.55, -2.7, -0.9, 1.4, -2.7]]).transpose()
+        landing_stage_7 = {'robot_states': self.robot_states, 'settling_time': 0.5, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_7 = SmoothFilter(**landing_stage_7)
+
+        qr = np.array([[-0.2, 1.0, -2.5, 0.2, 1.0, -2.5, -0.2, 1.0, -2.5, 0.2, 1.0, -2.5]]).transpose()
+        landing_stage_8 = {'robot_states': self.robot_states, 'settling_time': 0.5, 't_cont': 0.01, 'qHL': qr}
+        self.landing_stage_8 = SmoothFilter(**landing_stage_8)
+
+        self.reset_controller()
+
+    def update_dqr(self):
+        if self.tick * 0.01 <= 3:
+            delta_qr = self.landing_stage_1.smooth_reference().reshape(12, 1)
+        elif self.tick * 0.01 > 3 and self.tick * 0.01 <= 3.5:
+            delta_qr = self.landing_stage_2.smooth_reference().reshape(12, 1)
+        elif self.tick * 0.01 > 3.5 and self.tick * 0.01 <= 4:
+            delta_qr = self.landing_stage_3.smooth_reference().reshape(12, 1)
+        elif self.tick * 0.01 > 4 and self.tick * 0.01 <= 4.5:
+            delta_qr = self.landing_stage_4.smooth_reference().reshape(12, 1)
+        elif self.tick * 0.01 > 4.5 and self.tick * 0.01 <= 5:
+            delta_qr = self.landing_stage_5.smooth_reference().reshape(12, 1)
+        elif self.tick * 0.01 > 5 and self.tick * 0.01 <= 5.5:
+            delta_qr = self.landing_stage_6.smooth_reference().reshape(12, 1)
+        elif self.tick * 0.01 > 5.5 and self.tick * 0.01 <= 6:
+            delta_qr = self.landing_stage_7.smooth_reference().reshape(12, 1)
+        else:
+            self.task_finish = True
+            delta_qr = self.landing_stage_8.smooth_reference().reshape(12, 1)
+        self.tick += 1
+
+        return delta_qr
+
+    def reset_controller(self):
+        self.task_finish = False
+        self.tick = 0
