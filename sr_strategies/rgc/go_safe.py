@@ -17,6 +17,9 @@ class GoSafe(BaseRGC):
         self.N = 20
         self.M = 10
         self.ts = 0.01
+        self.convergence_threshold = 0.5
+        self.ws = 15
+        self._update_detector()
 
         self.nx = 24
         self.nu = 12
@@ -81,6 +84,8 @@ class GoSafe(BaseRGC):
         ]
 
         self.first_int = True
+
+        self.min_obj_val = 100
 
     def update_model(self):
         self._q, dq = self.ordering_joints()

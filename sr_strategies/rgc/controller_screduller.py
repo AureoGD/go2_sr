@@ -2,12 +2,14 @@ import numpy as np
 import pinocchio as pin
 from sr_strategies.rgc.go_safe import GoSafe
 from sr_strategies.rgc.prepare_cw import PrepareCW
-from sr_strategies.rgc.landing_cw import LandingCW
+from sr_strategies.rgc.landing_cw_tb_backup import LandingCW
 from sr_strategies.rgc.roll_cw import RollCW
 from sr_strategies.rgc.roll_ccw import RollCCW
 # implement CCW
 
 from sr_strategies.rgc.stand_up import StandUpPhase
+
+import time
 
 
 class ControlScheduler():
@@ -71,16 +73,15 @@ class ControlScheduler():
             if self.last_mode < len(self.controllers):
                 self.controllers[self.last_mode].reset_controller()
             self.last_mode = mode
-
         # Update delta_qr from current controller
         if mode < len(self.controllers):
             self.delta_qr = self.controllers[mode].update_dqr()
-            self.robot_states.subtask_success = self.controllers[mode].task_finish
+            self.controllers[mode].task_finish = self.robot_states.subtask_succes
         else:
             self.delta_qr = np.zeros((12, 1))
             self.robot_states.subtask_success = False
 
-        if mode in [1, 2]:
+        if mode in [1, 2, 3]:
             self.KD = self.kd * np.eye(12)
             self.KD[3:6, 3:6] = self.kd / 10 * np.eye(3)
         elif mode == 0:
@@ -90,4 +91,11 @@ class ControlScheduler():
 
         self.using_mpc = (mode in [0, 1, 2, 4])
 
+        # if mode == 0:
+        #     print(f"{self.robot_states.mpc_obj_val},")
+
         return self.delta_qr.reshape(12), self.KP, self.KD
+
+    def reset_controller(self):
+        for i in range(len(self.controllers)):
+            self.controllers[i].reset_controller()

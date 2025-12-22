@@ -1,28 +1,30 @@
 import os
+import torch
+import multiprocessing
+import numpy as np
+from functools import partial
+from typing import Tuple, List, Optional
+from tqdm import tqdm
 
-# Set thread limits before importing torch/numpy to avoid CPU contention
+# Set thread limits to avoid CPU contention (Redundant safety, as worker does it too)
 os.environ['OMP_NUM_THREADS'] = '1'
 os.environ['MKL_NUM_THREADS'] = '1'
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 
-import torch
-import multiprocessing
-from functools import partial
-import numpy as np
-from typing import Tuple, List, Optional
-
 # --- Custom Imports ---
-# Ensure these paths match your project structure
 from es_framework.commons.worker import init_worker, run_worker
-from es_framework.commons.nn_parameters import flatten_nn_parameters, unflatten_nn_parameters
+from es_framework.commons.nn_parameters import flatten_nn_parameters
 from es_framework.commons.logger import TrainingLogger
 from es_framework.cem_optimizer.cem_optimizer import CEMOptimizer
 from es_framework.commons.control_rule import ControlRule
-from es_framework.commons.initial_conditions import SelfAdaptingCurriculum
 
-# --- Experiment Setup ---
+# --- Environment & Curriculum Imports ---
+from environment.learning_phases import LearningPhases
+from environment.go2_state_normalizer import RunningNormalizer, NormalizerStats
+from es_framework.commons.curriculum_manager import CurriculumManager
+
+# --- Hyperparameters ---
 is_discrete = True
-# --- CEM Hyperparameters ---
 POPULATION_SIZE = 20
 GENERATIONS = 150
 ELITE_FRACTION = 0.25
@@ -30,92 +32,31 @@ INITIAL_STD_DEV = 2.5
 EXTRA_NOISE_SCALE = 0.5
 NOISE_DECAY_FACTOR = 0.99
 MIN_STD_DEV = 0.001
-UPDATE_RULE = "standard"  # "standard" or "cmaes_type"
-ELITE_WEIGHTING = "uniform"  # "uniform" or "logarithmic"
+UPDATE_RULE = "standard"
+ELITE_WEIGHTING = "uniform"
 
-# --- Neural Net Setup ---
+# Neural Net Params
 fc1_dim = 128
 fc2_dim = 128
 
-# --- Logging Setup ---
+# Logger Params
 log_dir = "es_framework"
 algorithm = 'cem'
 
 
-def aggregate_running_stats(stats_list: List[Tuple[float, np.ndarray, np.ndarray]]):
-    """
-    Merges a list of (count, mean, var) tuples using Chan's parallel algorithm.
-    Ignores any workers that return NaN or Inf values.
-    
-    Args:
-        stats_list: List of tuples (count, mean, var)
-        
-    Returns:
-        (total_count, final_mean, final_var) or (None, None, None) if all failed.
-    """
-    if not stats_list:
-        return 0, 0.0, 1.0  # Return default safe values if list is empty
-
-    # Initialize with clean defaults
-    total_n = 0
-    grand_mean = None
-    grand_m2 = None
-
-    valid_workers_count = 0
-
-    for i, (n_b, mu_b, var_b) in enumerate(stats_list):
-        # --- SAFETY CHECK ---
-        # If any value is NaN or Infinite, skip this worker
-        if not (np.isfinite(n_b) and np.all(np.isfinite(mu_b)) and np.all(np.isfinite(var_b))):
-            # Optional: Print warning so you know a worker failed
-            # print(f"Warning: Worker {i} returned invalid stats (NaN/Inf). Skipping.")
-            continue
-
-        # Calculate M2 (Sum of Squares) for the current worker
-        m2_b = var_b * n_b
-
-        # If this is the first VALID worker found, initialize
-        if grand_mean is None:
-            total_n = n_b
-            grand_mean = mu_b
-            grand_m2 = m2_b
-            valid_workers_count += 1
-            continue
-
-        # Standard Chan's Algorithm Update
-        n_new = total_n + n_b
-        delta = mu_b - grand_mean
-
-        new_mean = grand_mean + delta * (n_b / n_new)
-        new_m2 = grand_m2 + m2_b + (delta**2) * (total_n * n_b / n_new)
-
-        total_n = n_new
-        grand_mean = new_mean
-        grand_m2 = new_m2
-        valid_workers_count += 1
-
-    # If NO workers were valid (catastrophic failure of all), return None
-    if grand_mean is None:
-        return None, None, None
-
-    final_var = grand_m2 / total_n
-    return total_n, grand_mean, final_var
-
-
 def main():
-    # Initialize Logger
+    # 1. Initialize Logger
     logger = TrainingLogger(discrete=is_discrete, alg=algorithm)
 
-    # --- Environment / Model Config ---
+    # 2. Model Configuration
     config = {'model_config': {'fc1_dim': fc1_dim, 'fc2_dim': fc2_dim, 'discrete': is_discrete}}
     config['is_discrete'] = True
 
-    # Setup Reference Model for dimensions
     reference_model = ControlRule(observation_dim=63, output_dim=5, **config['model_config'])
     logger.set_reference_model(reference_model)
     param_dim = flatten_nn_parameters(reference_model).size
 
-    # Initialize Optimizer
+    # 3. Optimizer Setup
     cem = CEMOptimizer(param_dim=param_dim,
                        population_size=POPULATION_SIZE,
                        elite_fraction=ELITE_FRACTION,
@@ -127,138 +68,135 @@ def main():
                        extra_noise_scale=EXTRA_NOISE_SCALE)
     cem.set_initial_mean_params(reference_model)
 
-    # --- Parallel Setup ---
+    # 4. Parallel Workers Setup
     num_workers = min(20, POPULATION_SIZE)
-    logger.log_message(f"Starting CEM training with {num_workers} persistent parallel workers.")
+    logger.log_generation(0, [], None, None)  # Init console
+    print(f"[System] Starting CEM training with {num_workers} parallel workers.")
 
-    # Initialize workers with config
     initializer_with_args = partial(init_worker, config=config)
     pool = multiprocessing.Pool(processes=num_workers, initializer=initializer_with_args)
 
-    # Curriculum Setup
-    curriculum = SelfAdaptingCurriculum(min_difficulty=0.1, max_difficulty=1.0, use_ema_variance=True)
+    # 5. Curriculum & Data Managers
+    learning_phases = LearningPhases()
+    curriculum_mgr = CurriculumManager(phases=learning_phases, plateau_patience=10, consistency_threshold=0.8)
 
     try:
-        # Variable to hold the Global History of normalization statistics
-        # Structure: (mean, var, count) -> Matched to run_worker unpacking
-        current_norm_stats = None
+        # Holds the global normalization statistics (NormalizerStats object)
+        current_global_stats: Optional[NormalizerStats] = None
 
         for gen in range(1, GENERATIONS + 1):
 
-            # 1. Sample Population
+            # A. Sample Population
             population_params = cem.sample_population()
 
-            # 2. Update Curriculum
-            curriculum.set_difficulty(1.0)
-            initial_conditions = curriculum.get_initial_conditions(10)
-            diff = curriculum.current_difficulty
-            slope = curriculum.slope
+            # B. Curriculum: Determine Stage & Generate Data
+            active_stage_idx = curriculum_mgr.current_max_stage
 
-            # 3. Dispatch Tasks
-            # We pass 'current_norm_stats' (History) so workers can normalize inputs correctly
-            tasks = [
-                (i, params, initial_conditions, diff, current_norm_stats) for i, params in enumerate(population_params)
-            ]
+            # Generates a MIXED batch (Frontier + History)
+            initial_conditions, _ = learning_phases.get_initial_conditions(num_conditions=10,
+                                                                           max_difficulty_id=active_stage_idx)
 
-            results = pool.map(run_worker, tasks)
+            active_config = curriculum_mgr.frontier_config
+            diff_id = active_config.difficulty_id
+            current_slope_rad = active_config.terrain_angle_rad[1]
+
+            # C. Dispatch Tasks
+            tasks = [(i, params, initial_conditions, diff_id, current_global_stats)
+                     for i, params in enumerate(population_params)]
+
+            # --- PROGRESS BAR LOGIC ---
+            results = []
+            # 'imap_unordered' yields results as soon as they finish
+            with tqdm(total=len(tasks), desc=f"Gen {gen:03d} Processing", unit="ind", leave=False) as pbar:
+                for res in pool.imap_unordered(run_worker, tasks):
+                    results.append(res)
+                    pbar.update(1)
+
+            # CRITICAL: Sort results by task_id (index 0) because imap_unordered scrambles them
             results.sort(key=lambda x: x[0])
 
-            # 4. Process Results
+            # D. Process Results
             fitness_scores = [r[1] for r in results]
 
-            # These are 'Shadow' stats from the workers: (count, mean, var)
-            # They represent ONLY the data collected in THIS generation.
-            workers_new_stats = [r[2] for r in results]
+            # Extract 'Shadow Stats' (new data collected by workers)
+            workers_stats_list = [r[2] for r in results]
 
-            # --- AGGREGATION LOGIC ---
+            # Extract NEW Metric: Average Task Progress (-1.0 to 4.0)
+            task_progress_scores = [r[3] for r in results]
 
-            # Step A: Aggregate the Batch (Combine all workers for this Gen)
-            # Returns: (count, mean, var)
-            batch_count, batch_mean, batch_var = aggregate_running_stats(workers_new_stats)
+            # E. Aggregation Logic
+            batch_stats = RunningNormalizer.aggregate(workers_stats_list)
 
-            if batch_mean is None:
-                print(f"Gen {gen}: WARN - All workers returned invalid stats. Skipping normalization update.")
-
-                # Fallback: If we have no history yet and batch failed, create a dummy init
-                if current_norm_stats is None:
-                    # (mean, var, count)
-                    current_norm_stats = (np.zeros(18), np.ones(18), 1e-4)
+            if batch_stats is None:
+                print(f"\n[Warning] Gen {gen}: All workers returned invalid stats.")
+                # Fallback: Init empty stats if this is the first gen and it failed
+                if current_global_stats is None:
+                    current_global_stats = NormalizerStats(count=1e-4,
+                                                           mean=np.zeros(63, dtype=np.float32),
+                                                           var=np.ones(63, dtype=np.float32))
             else:
-                # Step B: Merge Batch with History
-                if current_norm_stats is None:
-                    # First generation: History IS the batch
-                    # Save as (Mean, Var, Count) to match run_worker expectation
-                    current_norm_stats = (batch_mean, batch_var, batch_count)
+                # Merge Batch with Global History
+                if current_global_stats is None:
+                    current_global_stats = batch_stats
                 else:
-                    # Unpack History (stored as Mean, Var, Count)
-                    hist_mean, hist_var, hist_count = current_norm_stats
+                    current_global_stats = RunningNormalizer.aggregate([current_global_stats, batch_stats])
 
-                    # Merge History + Batch using the same Chan's algorithm
-                    # input list expects: (Count, Mean, Var)
-                    new_total_count, new_global_mean, new_global_var = aggregate_running_stats([
-                        (hist_count, hist_mean, hist_var),  # History
-                        (batch_count, batch_mean, batch_var)  # New Batch
-                    ])
-
-                    # Update History: Store as (Mean, Var, Count)
-                    current_norm_stats = (new_global_mean, new_global_var, new_total_count)
-
-            # Unpack for logging
-            global_mean, global_var, total_count = current_norm_stats
-
-            # --- END AGGREGATION ---
-
-            # 5. Update Distribution (CEM Logic)
+            # F. Update Optimizer
             evaluated_population = list(zip(population_params, fitness_scores))
             cem.update_distribution(evaluated_population)
-            curriculum.update_difficulty(evaluated_population)
 
-            # 6. Log Generation
-            # Pass the Global History stats to be saved to disk
-            logger.log_generation(generation=gen,
-                                  evaluated_population=evaluated_population,
-                                  extra_metrics={
-                                      "Mean_StdDev_Params": float(getattr(cem, "mean_std_devs", float('nan'))),
-                                      "Extra_Noise_Scale": getattr(cem, "epsilon", float('nan')),
-                                      "Difficulty": diff,
-                                      "Slope": slope
-                                  },
-                                  normalization_data={
-                                      "mean": global_mean,
-                                      "var": global_var,
-                                      "count": total_count
-                                  })
+            # G. Check Curriculum Progression
+            # Pass the task_progress_scores to the manager
+            scenario_ids_proxy = [active_stage_idx] * len(evaluated_population)
+
+            curriculum_mgr.check_progression(
+                population_data=evaluated_population,
+                scenario_ids=scenario_ids_proxy,
+                population_task_progress=task_progress_scores,  # <--- NEW ARGUMENT
+                optimizer=cem)
+
+            # H. Log Generation
+            # Calculate metrics for logging
+            best_idx = np.argmax(fitness_scores)
+            best_ind_depth = task_progress_scores[best_idx]
+            pop_mean_depth = np.mean(task_progress_scores)
+
+            logger.log_generation(
+                generation=gen,
+                evaluated_population=evaluated_population,
+                normalization_stats=current_global_stats,
+                extra_metrics={
+                    "cem_sigma_mean": float(getattr(cem, "mean_std_devs", 0.0)),
+                    "cem_epsilon": getattr(cem, "epsilon", 0.0),
+                    "difficulty_id": diff_id,
+                    "frontier_slope": current_slope_rad,
+                    # New Data for Tensorboard:
+                    "Best_Ind_Avg_Depth": best_ind_depth,
+                    "Pop_Mean_Avg_Depth": pop_mean_depth
+                })
 
     except KeyboardInterrupt:
-        logger.log_message("Training interrupted by user.")
+        print("\n[System] Training interrupted by user.")
 
     except Exception as e:
-        logger.log_message(f"Training crashed with error: {e}")
+        print(f"\n[Error] Training crashed: {e}")
         import traceback
         traceback.print_exc()
 
     finally:
-        logger.log_message("Closing worker pool and saving final model...")
         pool.close()
         pool.join()
 
-        # Save Final Model
-        final_weights = cem.get_best_params()
-        final_state_dict = unflatten_nn_parameters(final_weights, reference_model)
-        final_path = os.path.join(logger.models_save_dir, "cem_model_final_mean.pth")
+        # Clean Save
+        if current_global_stats is not None:
+            logger.save_checkpoint(filename="model_final.pth",
+                                   params=cem.get_best_params(),
+                                   norm_stats=current_global_stats,
+                                   meta={
+                                       'fitness': 'final',
+                                       'gen': GENERATIONS
+                                   })
 
-        torch.save(final_state_dict, final_path)
-
-        # Also save the final normalizer stats associated with this model
-        if current_norm_stats is not None:
-            final_norm_path = os.path.join(logger.models_save_dir, "cem_model_final_mean_normalizer.npz")
-            np.savez(final_norm_path,
-                     mean=current_norm_stats[0],
-                     var=current_norm_stats[1],
-                     count=current_norm_stats[2])
-            logger.log_message(f"Final normalizer stats saved to {final_norm_path}")
-
-        logger.log_message(f"Final CEM mean weights saved to {final_path}")
         logger.close()
 
 

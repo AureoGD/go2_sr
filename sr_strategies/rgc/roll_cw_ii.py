@@ -18,8 +18,6 @@ class RollCW(BaseRGC):
         self.M = 15
         self.ts = 0.01
 
-        self._update_detector()
-
         self.nx = 29
         self.nu = 12
         self.ny = 12
@@ -77,7 +75,7 @@ class RollCW(BaseRGC):
 
         # Constraints for one foot
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 40])
-        foot_u = np.array([0, 0, np.inf, np.inf, 200])
+        foot_u = np.array([0, 0, np.inf, np.inf, 150])
 
         # Only RL foot
         self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))  # Shape: (15, 1)
@@ -90,13 +88,12 @@ class RollCW(BaseRGC):
         self.leg_idx = [3, 9, 6]
 
         self.contact_ids = [
-            self.model.getFrameId('FR_thigh_joint'),
-            self.model.getFrameId('RR_thigh_joint'),
+            self.model.getFrameId('FR_foot'),
+            self.model.getFrameId('RR_foot'),
             self.model.getFrameId('RL_foot'),
         ]
 
         self.first_int = True
-        self.min_obj_val = 0.75
 
     def update_model(self):
         q, dq = self.ordering_joints()
@@ -141,7 +138,7 @@ class RollCW(BaseRGC):
 
         J_com_stacked = np.vstack([J_com, J_com, J_com])
 
-        J_fl_com = np.vstack([J_com_full[:, 0:3], J_com_full[:, 0:3], J_com_full[:, 0:3], np.zeros((3, 3))])
+        J_fl_com = np.vstack([J_com_full[:, 0:3], J_com_full[:, 0:3], J_com_full[:, 0:3]])
 
         # --- 3. Build the 9x9 Gamma (Gamma) and 9x3 Sa ---
         Gamma = np.zeros((9, 9), dtype=np.float32)
@@ -163,47 +160,22 @@ class RollCW(BaseRGC):
 
             self.contacts[i, :] = contact_pos
 
-        # self.robot_states.contacts[0:3, :] = self.contacts
-        # self.robot_states.contacts[0, :] = self.data.oMf[self.model.getFrameId('FR_thigh_joint')].translation
-        # self.robot_states.contacts[1, :] = self.data.oMf[self.model.getFrameId('RR_thigh_joint')].translation
-        # self.robot_states.contacts[2, :] = self.data.oMf[self.model.getFrameId('RL_foot')].translation
-
         # Compute the 9x9 singular Gamma matrix
         Gamma = J_com_stacked - Jc
 
         # --- 4. Build the 3x9 Loop Constraint (J_loop) ---
         J_loop = np.zeros((3, 9), dtype=np.float32)
 
-        # Get 3x3 FR foot jacobian
-        J_fr_foot = pin.computeFrameJacobian(self.model, self.data, q, self.foot_ids[0],
-                                             pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6 + self.leg_idx[0]:9 +
-                                                                                     self.leg_idx[0]]
-
-        # Get 3x3 RR foot jacobian
-        J_rr_foot = pin.computeFrameJacobian(self.model, self.data, q, self.foot_ids[2],
-                                             pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6 + self.leg_idx[1]:9 +
-                                                                                     self.leg_idx[1]]
-
-        # Build J_loop = [J_fr_foot| -J_rr_foot | 0 ]
-        J_loop[:, 0:3] = J_fr_foot  # Columns for FL leg
-        # Columns 3-5 are already zero (for RL leg)
-        J_loop[:, 3:6] = -J_rr_foot  # Columns for RL leg
-
-        # --- 5. Build and Solve the Stacked System ---
-
-        J_task = np.vstack([Gamma, J_loop])  # 12x9 matrix
-        J_task_plus = np.linalg.pinv(J_task)  # 9x12 pseudoinverse
+        J_task_plus = np.linalg.pinv(Gamma)  # 9x12 pseudoinverse
 
         # --- 6. Build the Right-Hand-Side Mappings ---
         # Build the 12x3 linear mapping vector
-        I_stack = np.zeros((12, 3), dtype=np.float32)
+        I_stack = np.zeros((9, 3), dtype=np.float32)
         I_stack[0:9, :] = np.vstack([np.eye(3), np.eye(3), np.eye(3)])  # 9x3 part
-        # The last 3x3 block is zero (for J_loop's 0 target)
 
         # Build the 12x3 angular mapping vector
-        S_stack = np.zeros((12, 3), dtype=np.float32)
-        S_stack[0:9, :] = Sa  # 9x3 part
-        # The last 3x3 block is zero (for J_loop's 0 target)0
+        S_stack = np.zeros((9, 3), dtype=np.float32)
+        S_stack[0:9, :] = Sa
 
         # --- 7. Calculate final gamma_l and gamma_a ---
         # These are the final 9x3 mapping matrices for your 9x1 dq vector

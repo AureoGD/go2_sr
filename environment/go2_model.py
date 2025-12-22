@@ -3,6 +3,7 @@ import time
 import numpy as np
 import mujoco
 import mujoco.viewer
+import math
 import pinocchio as pin
 from environment.robot_states import RobotStates
 from scipy.spatial.transform import Rotation
@@ -65,7 +66,7 @@ class Go2ModelSimMuJoCo():
         self.viewer = None
         if self._is_render:
             self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
-            self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = True
+            self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = False
             # self.viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_TRANSPARENT] = True
 
         # Control gains
@@ -217,27 +218,6 @@ class Go2ModelSimMuJoCo():
         self.robot_states.qr = self.qr.reshape(12, 1)
         self.delta_qr, self.KP, self.KD = self.task_control.update(mode)
 
-    def get_all_collisions(self):
-        """Get all collision contacts"""
-        contacts = []
-        for i in range(self.data.ncon):
-            contact = self.data.contact[i]
-            geom1_id = contact.geom1
-            geom2_id = contact.geom2
-
-            # Skip if both geoms are from the same body (self-collision)
-            if geom1_id == geom2_id:
-                continue
-
-            geom1_name = self.model.geom(geom1_id).name
-            geom2_name = self.model.geom(geom2_id).name
-
-            # Filter out floor contacts if needed
-            if geom1_name != "floor" and geom2_name != "floor":
-                contacts.append(f"{geom1_name}-{geom2_name}")
-
-        return contacts
-
     def _update_robot_sim_states(self):
         """Update robot state variables from simulation"""
         # Joint positions and velocities using qpos addresses
@@ -260,6 +240,7 @@ class Go2ModelSimMuJoCo():
         self.robot_states.epsilon = self.base_orn.reshape(4, 1)
         self.robot_states.b_vel = self.base_lin_vel.reshape(3, 1)
         self.robot_states.omega = self.base_ang_vel.reshape(3, 1)
+        self.robot_states.rpy = self.quaternion_to_rpy(self.robot_states.epsilon).reshape(3, 1)
         self.robot_states.q = self.q.reshape(12, 1)
         self.robot_states.dq = self.dq.reshape(12, 1)
 
@@ -288,8 +269,10 @@ class Go2ModelSimMuJoCo():
             # Default joint positions in FR, FL, RR, RL order
             # random start pose
             # q0 = [0.9, 2, -1.65, -0.6, 1.86, -1.65, -0.5, 1.06, -1.0, 0.25, 1.36, -1.05]
+
             # safe pose
             q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
+
             # q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]  # upside
 
             # Side way
@@ -326,7 +309,7 @@ class Go2ModelSimMuJoCo():
 
         render_aux = self._is_render
         self._is_render = False
-        for _ in range(50):
+        for _ in range(100):
             self.control_loop(-1)
         self._is_render = render_aux
 
@@ -341,6 +324,39 @@ class Go2ModelSimMuJoCo():
         quat_wxyz = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
 
         return quat_wxyz
+
+    def quaternion_to_rpy(self, quaternion):
+        """        
+        Parameters:
+        quaternion: numpy array of shape (4, 1) with [[x], [y], [z], [w]] components
+        
+        Returns:
+        roll, pitch, yaw: Euler angles in radians
+        """
+        x = quaternion[0, 0]
+        y = quaternion[1, 0]
+        z = quaternion[2, 0]
+        w = quaternion[3, 0]
+
+        # Roll (x-axis rotation)
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x * x + y * y)
+        roll = math.atan2(sinr_cosp, cosr_cosp)
+
+        # Pitch (y-axis rotation)
+        sinp = 2 * (w * y - z * x)
+        if abs(sinp) >= 1:
+            # Use 90 degrees if out of range
+            pitch = math.copysign(math.pi / 2, sinp)
+        else:
+            pitch = math.asin(sinp)
+
+        # Yaw (z-axis rotation)
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        yaw = math.atan2(siny_cosp, cosy_cosp)
+
+        return np.array([roll, pitch, yaw])
 
     def close(self):
         """Close the simulation"""
@@ -480,11 +496,20 @@ class Go2ModelSimMuJoCo():
 # Usage example
 if __name__ == "__main__":
     sim = Go2ModelSimMuJoCo(render=True)
-    sim.reset_robot_pose()
+    q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
+    b0 = [2, 0, 0.8]
+    r0 = [0, 0, 0.25]
+    sim.reset_robot_pose(q0=q0, b0=b0, r0=r0)
     time.sleep(0.2)
     try:
+        tick = 0
         while (True):
-            sim.control_loop(mode=0)
+            if tick < 100:
+                mode = -1
+            else:
+                mode = 4
+            sim.control_loop(mode=mode)
+            tick += 1
     except KeyboardInterrupt:
         print("Simulation interrupted by user")
     finally:

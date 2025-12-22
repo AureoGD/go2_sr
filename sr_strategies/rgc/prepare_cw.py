@@ -17,6 +17,8 @@ class PrepareCW(BaseRGC):
         self.N = 20
         self.M = 15
         self.ts = 0.01
+        self.convergence_threshold = 0.08
+        self._update_detector()
 
         self.nx = 27
         self.nu = 12
@@ -76,7 +78,7 @@ class PrepareCW(BaseRGC):
 
         # qr = np.array([[-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.25, -2.0, -0.9, 4.45, -2.5]]).transpose()
 
-        qr = np.array([[-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.25, -2.0, 4.45, -2.5]]).transpose()
+        qr = np.array([[-0.9, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, 4.45, -2.5]]).transpose()
         ref = np.vstack((qr, np.zeros((3, 1))))
         self.ref = np.tile(ref, (self.N, 1))
 
