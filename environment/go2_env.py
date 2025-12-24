@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
-import math
+import psutil
+import os
 from environment.go2_sim import Go2ModelSimMuJoCo
 from environment.normalizer import Go2StateNormalizer
 
@@ -13,20 +14,22 @@ class Go2Env(gym.Env):
         self.env_id = env_id
         self.rendering = rendering
 
+        # --- DEBUG: TRACKING SETUP ---
+        self.internal_reset_count = 0
+        self.pid = os.getpid()
+        self.process = psutil.Process(self.pid)
+        # -----------------------------
+
         # --- DYNAMIC TIME HORIZON CONFIG ---
         self.max_step_limit = max_step
         self.current_step_limit = 300
         self.time_extension = 300
 
         # 2. EXTRACT STRATEGY
-        # Now 'kwargs' exists, so this works!
         strategy_name = kwargs.get('strategy', 'rgc')
 
         # 3. PASS IT TO THE SIMULATION
-        self.robot_sim = Go2ModelSimMuJoCo(
-            render=self.rendering,
-            strategy_name=strategy_name,  # <--- CRITICAL PASS
-            **kwargs)
+        self.robot_sim = Go2ModelSimMuJoCo(render=self.rendering, strategy_name=strategy_name, **kwargs)
 
         self.n_states = 63
         self.action_space = gym.spaces.Discrete(n=int(self.robot_sim.task_control.modes))
@@ -68,23 +71,25 @@ class Go2Env(gym.Env):
         # 2. Observation
         self._norm()
 
-        # 3. Reward (Handles Time Extension)
+        # 3. Reward
         reward = self._reward()
 
         # 4. Termination Logic
-        truncated = self.current_step >= self.current_step_limit
-        too_poor_performance = self.ep_reward < -100
-
-        mpc_crash = self.robot_sim.robot_states.critical_mpc_fail
-        excessive_switching = self.total_mode_changes > 50
-        is_standup = self.robot_sim.robot_states.sr_mode_completed.get(4, False)
-
-        terminated = mpc_crash or excessive_switching or is_standup or too_poor_performance
+        is_standup = self.robot_sim.robot_states.sr_mode_completed[4]
 
         if is_standup:
             self.ep_reward += reward + 20
         else:
             self.ep_reward += reward
+
+        truncated = self.current_step >= self.current_step_limit
+        too_poor_performance = self.ep_reward < -100
+
+        mpc_crash = self.robot_sim.robot_states.critical_mpc_fail
+        excessive_switching = self.total_mode_changes > 50
+        is_standup = self.robot_sim.robot_states.sr_mode_completed[4]
+
+        terminated = mpc_crash or excessive_switching or is_standup or too_poor_performance
 
         info = {}
         if truncated and not terminated:
@@ -95,6 +100,8 @@ class Go2Env(gym.Env):
 
     def reset(self, *, seed=None, q0=None, b0=None, r0=None):
         super().reset(seed=seed)
+
+        self.internal_reset_count += 1
 
         if q0 is None:
             q0 = [-0.2, 2, -1.65, -0.6, 1.86, -1.65, -0.5, 1.06, -1.0, 0.25, 1.36, -1.05]
@@ -125,8 +132,7 @@ class Go2Env(gym.Env):
         self.robot_sim.robot_states.critical_mpc_fail = False
         self.robot_sim.robot_states.subtask_succes = False
         self.robot_sim.robot_states.mpc_fail = False
-        for mode_key in self.robot_sim.robot_states.sr_mode_completed.keys():
-            self.robot_sim.robot_states.sr_mode_completed[mode_key] = False
+        self.robot_sim.robot_states.sr_mode_completed[:] = [False] * len(self.robot_sim.robot_states.sr_mode_completed)
 
         start_pos = self.robot_sim.robot_states.r_pos
         self.normalizer._norm_pos(start_pos.reshape(3))
@@ -172,12 +178,11 @@ class Go2Env(gym.Env):
 
         # --- TASK COMPLETION ---
         if bool(self.robot_sim.robot_states.subtask_succes) is True and \
-           self.robot_sim.robot_states.sr_mode_completed.get(self.current_mode, False) is False:
+           self.robot_sim.robot_states.sr_mode_completed[self.current_mode] is False:
 
             # Reset flags
-            for mode_key in self.robot_sim.robot_states.sr_mode_completed.keys():
-                self.robot_sim.robot_states.sr_mode_completed[mode_key] = False
-            self.robot_sim.robot_states.sr_mode_completed[self.current_mode] = True
+            self.robot_sim.robot_states.sr_mode_completed[:] = [False] * len(
+                self.robot_sim.robot_states.sr_mode_completed)
 
             # 1. Decay Reward
             count = self.end_phase_count[self.current_mode]
@@ -211,30 +216,3 @@ class Go2Env(gym.Env):
             return True
         except Exception:
             return False
-
-
-def run_test():
-    # Create the environment
-    env = Go2Env(rendering=True, max_step=100)
-
-    for i in range(10):
-        obs, info = env.reset()
-        done = False
-        total_reward = 0
-        ep = 0
-
-        while not done:
-            action = 0
-            obs, reward, terminated, truncated, info = env.step(action)
-            done = terminated or truncated
-            ep += 1
-            total_reward += reward
-
-        print("Episode finished.")
-        print("Total reward:", total_reward)
-
-    env.close()
-
-
-if __name__ == "__main__":
-    run_test()

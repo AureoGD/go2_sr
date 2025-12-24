@@ -5,10 +5,14 @@ from dataclasses import dataclass
 
 @dataclass
 class NormalizerStats:
-    """Data transfer object for sharing stats between processes."""
+    """
+    Data transfer object for sharing stats between processes.
+    NOTE: Data is stored as Lists/Floats during transfer to prevent
+    Multiprocessing 'Double Free' crashes caused by pickling NumPy arrays.
+    """
     count: float
-    mean: np.ndarray
-    var: np.ndarray
+    mean: Union[np.ndarray, List[float]]
+    var: Union[np.ndarray, List[float]]
 
 
 class RunningNormalizer:
@@ -20,8 +24,9 @@ class RunningNormalizer:
     def __init__(self, shape: Tuple[int, ...], clip_range: Tuple[float, float] = (-5.0, 5.0)):
         self.shape = shape
         self.clip_range = clip_range
-        self.mean = np.zeros(shape, dtype=np.float32)
-        self.var = np.ones(shape, dtype=np.float32)
+        # Use float64 for stability during accumulation
+        self.mean = np.zeros(shape, dtype=np.float64)
+        self.var = np.ones(shape, dtype=np.float64)
         self.count = 1e-4
 
     def update(self, x: np.ndarray):
@@ -29,9 +34,9 @@ class RunningNormalizer:
         if x.shape[0] == 0:
             return
 
-        batch_mean = np.mean(x, axis=0)
-        batch_var = np.var(x, axis=0)
-        batch_count = x.shape[0]
+        batch_mean = np.mean(x, axis=0, dtype=np.float64)
+        batch_var = np.var(x, axis=0, dtype=np.float64)
+        batch_count = float(x.shape[0])
         self._merge_stats(batch_count, batch_mean, batch_var)
 
     def _merge_stats(self, b_count: float, b_mean: np.ndarray, b_var: np.ndarray):
@@ -49,60 +54,71 @@ class RunningNormalizer:
         self.count = tot_count
 
     def normalize(self, x: np.ndarray) -> np.ndarray:
-        std = np.sqrt(self.var) + 1e-8
-        normalized = (x - self.mean) / std
+        # Convert to float32 only at the very end for the network
+        mean_32 = self.mean.astype(np.float32)
+        var_32 = self.var.astype(np.float32)
+
+        std = np.sqrt(var_32) + 1e-8
+        normalized = (x - mean_32) / std
         return np.clip(normalized, self.clip_range[0], self.clip_range[1])
 
     def get_stats(self) -> NormalizerStats:
-        """Export current stats."""
-        return NormalizerStats(self.count, self.mean.copy(), self.var.copy())
+        """
+        Export current stats SAFE for Multiprocessing.
+        Converts NumPy arrays to standard Python Lists.
+        """
+        return NormalizerStats(
+            count=float(self.count),
+            mean=self.mean.tolist(),  # Convert to list to avoid Double Free
+            var=self.var.tolist()  # Convert to list to avoid Double Free
+        )
 
     def set_stats(self, stats: NormalizerStats):
-        """Import stats (e.g., from global history)."""
+        """Import stats (handles both Lists and Arrays)."""
         self.count = stats.count
-        self.mean = stats.mean
-        self.var = stats.var
+        self.mean = np.array(stats.mean, dtype=np.float64)
+        self.var = np.array(stats.var, dtype=np.float64)
 
     @staticmethod
     def aggregate(stats_list: List[Optional[NormalizerStats]]) -> Optional[NormalizerStats]:
         """
         Merges a list of NormalizerStats using Chan's parallel algorithm.
-        Robust to None values and invalid types.
+        Safe for both Arrays and Lists.
         """
         if not stats_list:
             return None
 
-        # --- FIX 2: ROBUST FILTERING ---
+        # --- STEP 1: PARSE & CONVERT BACK TO NUMPY ---
         valid_stats = []
         for s in stats_list:
-            # 1. Check if object exists
             if s is None:
                 continue
-            # 2. Check if attributes exist (in case of bad return object)
-            if not hasattr(s, 'count') or not hasattr(s, 'mean'):
-                continue
 
-            # 3. Check values safely
             try:
-                # Explicit float conversion check to catch 'ufunc' errors
-                if np.isfinite(s.count) and np.all(np.isfinite(s.mean)):
-                    valid_stats.append(s)
+                # Reconstruct NumPy arrays from lists if necessary
+                s_mean = np.array(s.mean, dtype=np.float64)
+                s_var = np.array(s.var, dtype=np.float64)
+                s_count = float(s.count)
+
+                if np.isfinite(s_count) and np.all(np.isfinite(s_mean)):
+                    # Store as a temporary simple object for processing
+                    valid_stats.append({'count': s_count, 'mean': s_mean, 'var': s_var})
             except (TypeError, ValueError):
                 continue
 
         if not valid_stats:
             return None
 
-        # Initialize with first valid
-        total_n = valid_stats[0].count
-        grand_mean = valid_stats[0].mean
+        # --- STEP 2: AGGREGATE ---
+        total_n = valid_stats[0]['count']
+        grand_mean = valid_stats[0]['mean']
         # Recover M2 from Var (M2 = Var * N)
-        grand_m2 = valid_stats[0].var * valid_stats[0].count
+        grand_m2 = valid_stats[0]['var'] * total_n
 
         for s in valid_stats[1:]:
-            n_b = s.count
-            mu_b = s.mean
-            m2_b = s.var * n_b  # Recover M2
+            n_b = s['count']
+            mu_b = s['mean']
+            m2_b = s['var'] * n_b  # Recover M2
 
             delta = mu_b - grand_mean
             n_new = total_n + n_b
@@ -115,13 +131,14 @@ class RunningNormalizer:
             grand_m2 = new_m2
 
         final_var = grand_m2 / total_n
-        return NormalizerStats(total_n, grand_mean, final_var)
+
+        # Return as Lists (Safe for transport if needed)
+        return NormalizerStats(total_n, grand_mean.tolist(), final_var.tolist())
 
 
 class Go2StateNormalizer:
     """
     Handles domain-specific normalization for the Unitree Go2 robot.
-    Manages both hard-limits (Joints) and soft-stats (Velocities).
     """
     IDX = {
         'POS': slice(0, 3),
@@ -162,9 +179,8 @@ class Go2StateNormalizer:
         self.torque_limits = np.array([23.7, 23.7, 45.43] * 4)
         self.num_modes = 5
 
-    # --- FIX 1: ADDED MISSING METHOD ---
     def reset_shadow(self):
-        """Resets the shadow normalizer. Essential for worker initialization."""
+        """Resets the shadow normalizer."""
         self.shadow_normalizer = RunningNormalizer(shape=(18,))
 
     def normalize(self, state: np.ndarray, update_stats: bool = False) -> np.ndarray:
@@ -196,7 +212,9 @@ class Go2StateNormalizer:
         return self.shadow_normalizer.get_stats()
 
     def sync_global_stats(self, global_stats: NormalizerStats):
-        self.vel_normalizer.set_stats(global_stats)
+        # Handle cases where global_stats might be None on first run
+        if global_stats is not None:
+            self.vel_normalizer.set_stats(global_stats)
         self.reset_shadow()
 
     def _extract_velocities(self, state):

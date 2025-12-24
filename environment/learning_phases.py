@@ -156,4 +156,7 @@ class LearningPhases:
 
         z_final = z_geometric + z_drop
 
+        if z_final < 0:
+            print("ERROR")
+
         return [float(x_final), float(y_final), float(z_final)]

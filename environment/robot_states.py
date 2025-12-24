@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, List
 
 
 @dataclass
@@ -28,10 +28,4 @@ class RobotStates:
     subtask_succes: bool = field(default=False)
     mpc_obj_val: float = field(default=0)
 
-    sr_mode_completed: Dict[int, bool] = field(default_factory=lambda: {
-        0: False,  # go_safe
-        1: False,  # prepare_cw
-        2: False,  # roll_cw
-        3: False,  # landing_cw
-        4: False  # stand_up
-    })
+    sr_mode_completed: List[bool] = field(default_factory=lambda: [False] * 5)
