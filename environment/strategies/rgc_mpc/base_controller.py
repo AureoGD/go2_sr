@@ -79,7 +79,21 @@ class LogCompletionDetector:
 
 class BaseRGC:
 
+    TASK_NAME = "undefined"
+    TASK_LEVEL = -1
+
     def __init__(self, **kwargs):
+        # Always set semantic metadata
+        self.task_name = self.TASK_NAME
+        self.task_level = self.TASK_LEVEL
+        self.task_finish_detect = None
+
+        # Detect runtime vs metadata-only mode
+        self.runtime = "robot_states" in kwargs
+
+        if not self.runtime:
+            return
+
         self.model = kwargs.get('model')
         self.data = kwargs.get('data')
         self.geo_model = kwargs.get('geo_model')
@@ -90,10 +104,11 @@ class BaseRGC:
         self.foot_ids = kwargs.get('foot_ids')
         self.kp = kwargs.get('kp')
         self.kd = kwargs.get('kd')
-        self.robot_states = kwargs.get('robot_states')
+        self.robot_states = kwargs.get('robot_states', None)
         self.total_mass = self.get_total_mass()
-        self.i = 0
+        # Give a name for each task and a "level"
 
+        self.i = 0
         self.N = None
         self.M = None
         self.ts = None
@@ -115,11 +130,9 @@ class BaseRGC:
         self.u = None
         self.prob = osqp.OSQP()
         self.op_init = False
-        self.task_finish = False
         self.first_int = True
         self.min_obj_val = 100
 
-        self.task_finish_detect = None
         self.convergence_threshold = 0.15
         self.ws = 20
 
@@ -129,6 +142,8 @@ class BaseRGC:
         self.task_finish_detect = LogCompletionDetector(window_size=self.ws, threshold=self.convergence_threshold)
 
     def update_dqr(self):
+        if not self.runtime:
+            return np.zeros(12)
         try:
             # Silence ALL outputs (NumPy warnings, OSQP C-logs, etc.)
             with silence_all_output():
@@ -348,7 +363,7 @@ class BaseRGC:
         self.robot_states.r_pos = r.reshape(3, 1)
 
     def reset_controller(self):
-        self.task_finish_detect.reset()
-        self.task_finish = False
+        if self.task_finish_detect is not None:
+            self.task_finish_detect.reset()
         self.first_int = True
         self.prob = None

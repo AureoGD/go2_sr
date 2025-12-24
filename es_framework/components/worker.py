@@ -100,6 +100,8 @@ def run_micro_task(task_args: Tuple):
         episode_reward = 0.0
         max_steps = getattr(sim_instance, "max_step_limit", 1000)
 
+        policy_net.eval()
+
         # ----------------------------------------------------
         # Rollout loop
         # ----------------------------------------------------
@@ -107,8 +109,13 @@ def run_micro_task(task_args: Tuple):
             if step % 25 == 0:
                 shared_heartbeat[ind_id] = time.time()
 
+            with torch.no_grad():
+                action, _ = policy_net.predict(obs)
+
+            action = int(action)
+
             # Baseline safe action
-            obs, reward, terminated, truncated, _ = sim_instance.step(0)
+            obs, reward, terminated, truncated, _ = sim_instance.step(action)
             episode_reward += reward
 
             if terminated or truncated:

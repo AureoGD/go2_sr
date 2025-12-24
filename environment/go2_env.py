@@ -75,21 +75,19 @@ class Go2Env(gym.Env):
         reward = self._reward()
 
         # 4. Termination Logic
-        is_standup = self.robot_sim.robot_states.sr_mode_completed[4]
+        is_standup = self.robot_sim.robot_states.sr_mode_completed[5]
 
         if is_standup:
             self.ep_reward += reward + 20
         else:
             self.ep_reward += reward
 
-        truncated = self.current_step >= self.current_step_limit
         too_poor_performance = self.ep_reward < -100
-
         mpc_crash = self.robot_sim.robot_states.critical_mpc_fail
         excessive_switching = self.total_mode_changes > 50
-        is_standup = self.robot_sim.robot_states.sr_mode_completed[4]
-
         terminated = mpc_crash or excessive_switching or is_standup or too_poor_performance
+
+        truncated = self.current_step >= self.current_step_limit
 
         info = {}
         if truncated and not terminated:

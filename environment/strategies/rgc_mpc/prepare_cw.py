@@ -6,9 +6,16 @@ from environment.strategies.rgc_mpc.base_controller import BaseRGC
 
 class PrepareCW(BaseRGC):
 
-    def __init__(self, **kwargs):
+    TASK_NAME = "prepare_cw"
+    TASK_LEVEL = 2
 
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+        if not self.runtime:
+            # Metadata-only: nothing else to do
+            return
+
         self.N = 20
         self.M = 15
         self.ts = 0.01

@@ -7,9 +7,15 @@ from scipy.spatial import ConvexHull
 
 class RollCW(BaseRGC):
 
-    def __init__(self, **kwargs):
+    TASK_NAME = "roll_cw"
+    TASK_LEVEL = 3
 
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
+        if not self.runtime:
+            return
+
         self.N = 20
         self.M = 15
         self.ts = 0.01

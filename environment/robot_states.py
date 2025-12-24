@@ -28,4 +28,4 @@ class RobotStates:
     subtask_succes: bool = field(default=False)
     mpc_obj_val: float = field(default=0)
 
-    sr_mode_completed: List[bool] = field(default_factory=lambda: [False] * 5)
+    sr_mode_completed: List[bool] = field(default_factory=lambda: [False] * 6)

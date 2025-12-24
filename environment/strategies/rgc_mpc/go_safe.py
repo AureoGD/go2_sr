@@ -5,10 +5,15 @@ from environment.strategies.rgc_mpc.base_controller import BaseRGC
 
 
 class GoSafe(BaseRGC):
+    TASK_NAME = "go_safe"
+    TASK_LEVEL = 1
 
     def __init__(self, **kwargs):
-
         super().__init__(**kwargs)
+
+        if not self.runtime:
+            return
+
         self.N = 20
         self.M = 10
         self.ts = 0.01

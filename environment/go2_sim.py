@@ -251,6 +251,9 @@ class Go2ModelSimMuJoCo():
         if mode != -1:
             self._task_control(mode)
 
+            if self.robot_states.critical_mpc_fail:
+                return
+
         for _ in range(int(self.con_dt / self.dyn_dt)):
             signal.alarm(1)
             try:
