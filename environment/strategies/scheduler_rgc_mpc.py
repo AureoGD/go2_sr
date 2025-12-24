@@ -103,7 +103,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
             self.KD = (self.kd / 10.0) * np.eye(12)
 
         elif mode in [2, 3, 4]:
-            # Prepare / Roll / Landing
+            # Prepare / Roll / Landing CW
             self.KP = self.kp * np.eye(12)
             self.KD = self.kd * np.eye(12)
             self.KD[3:6, 3:6] = (self.kd / 10.0) * np.eye(3)
