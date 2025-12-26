@@ -63,6 +63,9 @@ def main():
 
     policy = Policy(obs_dim, act_dim, **config["model_config"])
 
+    params = list(policy.parameters())
+    assert len(params) > 0, "Policy has no parameters!"
+
     phases = LearningPhases()
     curriculum = CurriculumManager(phases=phases)
     optimizer = get_optimizer(config["optimizer_type"], config, policy)

@@ -1,146 +1,137 @@
 import os
+import json
 import torch
 import numpy as np
 import time
-from es_framework.commons.control_rule import ControlRule
-from environment.env_go2 import Go2Env
 
-# ==============================================================================
-# CONFIGURATION
-# ==============================================================================
-# CONTROL MODE: True = Use Neural Network | False = Use Hardcoded If/Else
-USE_TRAINED_POLICY = True
+from environment.go2_env import Go2Env
+from environment.normalizer import NormalizerStats
+from es_framework.components.policy import Policy
 
-# Path to your saved model folder
-MODEL_DIR = "models/cem/D_cem_20251222_011002"
-MODEL_FILE = "model_best_overall.pth"
+USE_TRAINED_POLICY = False
 
-# Network Hyperparameters (Must match training!)
-FC1_DIM = 128
-FC2_DIM = 128
-IS_DISCRETE = True
+RESULTS_DIR = "results/go2_self_righting_CEM_20251225_091824"
+MODEL_DIR = os.path.join(RESULTS_DIR, "models")
+MODEL_FILE = "gen_0140.pth"
+CONFIG_FILE = os.path.join(RESULTS_DIR, "config.json")
 
-# Simulation Settings
-DIFFICULTY = 1.0  # Test at full difficulty
+DIFFICULTY = 1.0
 EPISODE_LENGTH = 1500
-RENDER = True  # Set to True to verify behavior visually
-# ==============================================================================
+RENDER = True
 
 
 def main():
-    # 1. Initialize Environment
-    # We use ID 0 and rendering=True to see the simulation
     env = Go2Env(env_id=0, rendering=RENDER, max_step=EPISODE_LENGTH)
     env.set_difficulty(DIFFICULTY)
 
-    # 2. Initialize Model Architecture
-    obs_dim = env.observation_space.shape[0]
-
-    if IS_DISCRETE:
-        out_dim = env.action_space.n
-    else:
-        out_dim = env.action_space.shape[0]
-
-    policy = ControlRule(observation_dim=obs_dim,
-                         output_dim=out_dim,
-                         fc1_dim=FC1_DIM,
-                         fc2_dim=FC2_DIM,
-                         discrete=IS_DISCRETE)
-
-    # 3. Load Weights (Only if using Policy)
     if USE_TRAINED_POLICY:
+        obs_dim = env.observation_space.shape[0]
+        out_dim = env.action_space.n
+
+        if not os.path.exists(CONFIG_FILE):
+            raise FileNotFoundError(f"config.json not found: {CONFIG_FILE}")
+
+        with open(CONFIG_FILE, "r") as f:
+            train_config = json.load(f)
+
+        model_cfg = train_config.get("model_config", None)
+        if model_cfg is None:
+            raise RuntimeError("model_config missing from config.json")
+
+        policy = Policy(observation_dim=obs_dim, output_dim=out_dim, **model_cfg)
+
+        params = list(policy.parameters())
+        assert len(params) > 0, "Policy has no parameters!"
         model_path = os.path.join(MODEL_DIR, MODEL_FILE)
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Checkpoint file not found: {model_path}")
 
         print(f"[-] Loading checkpoint from {model_path}...")
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
 
-        # Load the dictionary
-        checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
-
-        # A. Load Neural Network Weights
-        if 'model_state_dict' in checkpoint:
-            policy.load_state_dict(checkpoint['model_state_dict'])
-            print("    [OK] Model weights loaded.")
+        if "model_state_dict" in checkpoint:
+            policy.load_state_dict(checkpoint["model_state_dict"])
         else:
-            policy.load_state_dict(checkpoint)  # Legacy fallback
-            print("    [Warning] Loaded raw state dict.")
+            policy.load_state_dict(checkpoint)
 
-        policy.eval()  # Set to evaluation mode
+        policy.eval()
 
-        # B. Load Normalization Statistics
-        if 'normalizer_state' in checkpoint:
-            norm_data = checkpoint['normalizer_state']
+        if "normalizer_state" in checkpoint:
+            norm_data = checkpoint["normalizer_state"]
 
-            # FIX: Convert dictionary to Object if necessary
             if isinstance(norm_data, dict):
-                from types import SimpleNamespace
-                # This creates an object where obj.key can be accessed as obj.key
-                norm_stats = SimpleNamespace(**norm_data)
+                mean = norm_data.get("mean", None)
+                var = norm_data.get("var", None)
+
+                if mean is None or var is None:
+                    raise RuntimeError(f"Invalid normalizer_state keys: {list(norm_data.keys())}")
+
+                count = norm_data.get("count", 1.0)
+
+                norm_stats = NormalizerStats(
+                    count=float(count),
+                    mean=np.asarray(mean, dtype=np.float64),
+                    var=np.asarray(var, dtype=np.float64),
+                )
             else:
                 norm_stats = norm_data
 
             env.normalizer.sync_global_stats(norm_stats)
-
-            print("    [OK] Normalizer stats loaded.")
-            print(f"         Count: {norm_stats.count:.1f}")
+            print("[OK] Normalizer loaded.")
         else:
-            print("    [CRITICAL WARNING] 'normalizer_state' key missing!")
+            print("[WARNING] No normalizer stats found in checkpoint.")
 
-        print("\n=== Starting Evaluation Loop (Press Ctrl+C to stop) ===")
+        print("\n=== Starting Evaluation Loop (Ctrl+C to stop) ===")
 
     try:
-        for i in range(5):
-            print(f"\n--- Episode {i+1} ---")
+        for ep in range(5):
+            print(f"\n--- Episode {ep + 1} ---")
 
-            # Reset Env
             obs, info = env.reset()
-            total_reward = 0
+            total_reward = 0.0
             tick = 0
 
-            # Start Timer
             start_time = time.perf_counter()
 
             for step in range(EPISODE_LENGTH):
 
-                # --- SELECT ACTION ---
                 if USE_TRAINED_POLICY:
                     with torch.no_grad():
-                        action, _ = policy.predict(obs)
+                        action, _ = policy.predict(obs, deterministic=True)
+                        action = int(action)
                 else:
-                    # Hardcoded Logic
                     if tick < 120:
-                        action = 0
-                    elif tick >= 120 and tick < 350:
                         action = 1
-                    elif tick >= 350 and tick < 500:
+                    elif tick < 350:
                         action = 2
-                    elif tick >= 500 and tick < 1100:
+                    elif tick < 500:
                         action = 3
-                    elif tick >= 1100 and tick < 1500:
+                    elif tick < 1100:
                         action = 4
+                    elif tick < 1350:
+                        action = 5
                     else:
-                        action = -1
+                        action = 0
 
-                # --- STEP ENVIRONMENT ---
                 obs, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
 
-                # Render delay if needed
-                # if RENDER: time.sleep(0.002)
-
                 if terminated or truncated:
-                    end_time = time.perf_counter()
-                    elapsed_time = end_time - start_time
+                    elapsed = time.perf_counter() - start_time
+                    status = ("SUCCESS" if info.get("is_success", False) else
+                              ("TERMINATED" if terminated else "TRUNCATED"))
 
-                    reason = "Terminated" if terminated else "Truncated"
-                    print(f"[{reason}] Reward: {total_reward:.4f} | Steps: {step+1} | Time: {elapsed_time:.4f}s")
+                    print(f"[{status}] "
+                          f"Reward: {total_reward:.3f} | "
+                          f"Steps: {step + 1} | "
+                          f"Time: {elapsed:.3f}s")
                     break
 
                 tick += 1
 
     except KeyboardInterrupt:
-        print("\nEvaluation stopped by user.")
+        print("\nEvaluation interrupted by user.")
+
     finally:
         env.close()
 

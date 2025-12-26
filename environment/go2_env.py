@@ -50,7 +50,7 @@ class Go2Env(gym.Env):
         self.heigh_weight = 0.1
 
         self.MIN_DWELL_TICKS = 20
-
+        self.MAX_PHASE_COUNT = 15
         self.PROGRESS_MODES = {3, 4, 5, 7, 8}
 
         self.min_upright_height = 0.15
@@ -70,15 +70,16 @@ class Go2Env(gym.Env):
         reward = self._reward()
         self.ep_reward += reward
 
-        terminated, truncated, success = self._termination()
-
+        terminated, truncated, success, ext_penalty = self._termination()
+        info = {}
         if success:
             reward += 20.0
             self.ep_reward += 20.0
-
-        info = {}
-        if success:
             info["is_success"] = True
+
+        if terminated:
+            reward -= ext_penalty
+            self.ep_reward -= ext_penalty
 
         if truncated and not terminated:
             info["TimeLimit.truncated"] = True
@@ -131,6 +132,7 @@ class Go2Env(gym.Env):
         self.start_height = self.robot_sim.robot_states.r_pos[2]
 
         self.stagnation_counter = 0
+        self.staup_end_flag = False
 
         return self.st, {"Episode": self.ep, "Episode reward": ep_r}
 
@@ -184,13 +186,16 @@ class Go2Env(gym.Env):
             self.robot_sim.robot_states.sr_mode_completed[:] = \
                 [False] * len(self.robot_sim.robot_states.sr_mode_completed)
 
-            count = self.end_phase_count[self.current_mode]
+            count = min(self.end_phase_count[self.current_mode], self.MAX_PHASE_COUNT)
             r += self.end_task_weight / (2**count)
 
             decayed_time = self.time_extension / (2**count)
             self.current_step_limit = min(self.current_step_limit + decayed_time, self.max_step_limit)
 
             self.end_phase_count[self.current_mode] += 1
+
+            if self.current_mode == 5:
+                self.staup_end_flag = True
 
         if self.current_mode in self.PROGRESS_MODES:
             roll_progress = self.start_roll - abs_roll
@@ -204,7 +209,7 @@ class Go2Env(gym.Env):
             self.stagnation_counter = 0
 
         self.current_mode_success_tick += 1
-        r -= 0.001 * self.current_mode_success_tick
+        r -= 0.01 * self.stagnation_counter
 
         if self.robot_sim.robot_states.mpc_fail:
             r -= 1.0
@@ -212,6 +217,7 @@ class Go2Env(gym.Env):
         return float(r)
 
     def _termination(self):
+        ext_penalty = 0
         roll = abs(self.robot_sim.robot_states.rpy[0])
         pitch = abs(self.robot_sim.robot_states.rpy[1])
         z = self.robot_sim.robot_states.r_pos[2]
@@ -221,18 +227,21 @@ class Go2Env(gym.Env):
         REQUIRED_PHASES = [1, 2, 3, 4, 5]
         sequence_completed = all(self.end_phase_count[p] > 0 for p in REQUIRED_PHASES)
 
-        stand_completed = self.robot_sim.robot_states.sr_mode_completed[5]
+        stand_completed = self.staup_end_flag
 
         success = physically_upright and stand_completed and sequence_completed
 
         mpc_crash = self.robot_sim.robot_states.critical_mpc_fail
         too_many_switches = self.total_mode_changes > 50
-        stagnated = self.stagnation_counter > 300
+        stagnated = self.stagnation_counter > 1000
 
         terminated = success or mpc_crash or stagnated or too_many_switches
         truncated = self.current_step >= self.current_step_limit
 
-        return terminated, truncated, success
+        if mpc_crash:
+            ext_penalty = 10
+
+        return terminated, truncated, success, ext_penalty
 
     def save_normalizer(self, filepath):
         try:

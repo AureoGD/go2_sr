@@ -272,7 +272,6 @@ class Go2ModelSimMuJoCo():
     def _task_control(self, mode):
         self.qr += self.delta_qr
         self.robot_states.qr = self.qr.reshape(12, 1)
-        self.qr = np.zeros(12)
         self.delta_qr, self.KP, self.KD = self.task_control.update(mode)
 
     def reset_robot_pose(self, q0=None, b0=None, r0=None):

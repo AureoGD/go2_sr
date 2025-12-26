@@ -284,32 +284,34 @@ class BaseRGC:
 
         return q, dq
 
-    def eps_reference(self, current_yaw=None, desired_yaw=None):
-        """
-        Compute quaternion that makes torso vertical while preserving yaw
-        """
-        gravity = np.array([0, 0, -1])
-
-        desired_z = -gravity  # = [0, 0, 1]
-
-        if desired_yaw is not None:
-            yaw = desired_yaw
-        elif current_yaw is not None:
-            yaw = current_yaw  # Maintain current yaw
+    def eps_reference(self, current_yaw=None, desired_yaw=None, plane_normal=None, pivot_direction=None):
+        if plane_normal is not None:
+            desired_z = plane_normal / np.linalg.norm(plane_normal)
         else:
-            yaw = 0  # Default
+            desired_z = np.array([0., 0., 1.])
 
-        desired_x = np.array([np.cos(yaw), np.sin(yaw), 0])
+        if pivot_direction is not None:
+            desired_x = pivot_direction / np.linalg.norm(pivot_direction)
+        else:
+            if desired_yaw is not None:
+                yaw = desired_yaw
+            elif current_yaw is not None:
+                yaw = current_yaw
+            else:
+                yaw = 0
+            desired_x = np.array([np.cos(yaw), np.sin(yaw), 0])
 
         desired_y = np.cross(desired_z, desired_x)
-        desired_y = desired_y / np.linalg.norm(desired_y)
+        if np.linalg.norm(desired_y) < 1e-6:
+            desired_y = np.array([0., 1., 0.])
+        else:
+            desired_y = desired_y / np.linalg.norm(desired_y)
+
         desired_x = np.cross(desired_y, desired_z)
+        desired_x = desired_x / np.linalg.norm(desired_x)
 
         R = np.column_stack([desired_x, desired_y, desired_z])
-
-        eps_ref = self.rotation_matrix_to_quaternion(R)
-
-        return eps_ref
+        return self.rotation_matrix_to_quaternion(R), R
 
     def rotation_matrix_to_quaternion(self, R):
         """
@@ -367,3 +369,43 @@ class BaseRGC:
             self.task_finish_detect.reset()
         self.first_int = True
         self.prob = None
+
+    def cont_surfaces(self, c1, c2, c3):
+        v1 = c2 - c1
+        v2 = c3 - c1
+        n = np.cross(v1, v2)
+        norm_n = np.linalg.norm(n)
+        if norm_n < 1e-10:
+            n = np.array([0.0, 0.0, 1.0])
+            t1 = np.array([1.0, 0.0, 0.0])
+            t2 = np.array([0.0, 1.0, 0.0])
+            return n, t1, t2
+
+        if n[2] < 0:
+            n = -n
+
+        n = n / norm_n
+
+        t1 = v1 / np.linalg.norm(v1)
+
+        t1 = t1 - np.dot(t1, n) * n
+        t1_norm = np.linalg.norm(t1)
+
+        if t1_norm < 1e-10:
+
+            if abs(n[0]) > 0.1 or abs(n[1]) > 0.1:
+                t1 = np.array([-n[1], n[0], 0.0])
+            else:
+                t1 = np.array([1.0, 0.0, 0.0])
+        else:
+            t1 = t1 / t1_norm
+
+        t2 = np.cross(n, t1)
+        t2 = t2 / np.linalg.norm(t2)
+
+        return n, t1, t2
+
+    def cf_matrix(self, n, t1, t2, mu):
+        Cf = np.vstack([-mu * n + t1, -mu * n + t2, mu * n + t2, mu * n + t1, n])
+
+        return Cf

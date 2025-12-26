@@ -8,7 +8,8 @@ from environment.strategies.rgc_mpc.hold_position import HoldPosition
 from environment.strategies.rgc_mpc.go_safe import GoSafe
 from environment.strategies.rgc_mpc.prepare_cw import PrepareCW
 from environment.strategies.rgc_mpc.roll_cw import RollCW
-from environment.strategies.rgc_mpc.landing_cw_tb_backup import LandingCW
+# from environment.strategies.rgc_mpc.landing_cw_tb_backup import LandingCW
+from environment.strategies.rgc_mpc.landing_cw_rgc import LandingCW
 from environment.strategies.rgc_mpc.stand_up import StandUpPhase
 
 CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, StandUpPhase]
