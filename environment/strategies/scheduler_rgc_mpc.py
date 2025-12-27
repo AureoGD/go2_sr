@@ -10,9 +10,10 @@ from environment.strategies.rgc_mpc.prepare_cw import PrepareCW
 from environment.strategies.rgc_mpc.roll_cw import RollCW
 # from environment.strategies.rgc_mpc.landing_cw_tb_backup import LandingCW
 from environment.strategies.rgc_mpc.landing_cw_rgc import LandingCW
+from environment.strategies.rgc_mpc.end_landing_cw import EndLandingCW
 from environment.strategies.rgc_mpc.stand_up import StandUpPhase
 
-CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, StandUpPhase]
+CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, EndLandingCW, StandUpPhase]
 
 
 class SchedulerRGCMPC(BaseSelfRighting):
@@ -75,6 +76,8 @@ class SchedulerRGCMPC(BaseSelfRighting):
         # Validate mode
         if mode < 0 or mode >= self.modes:
             return np.zeros(12), self.KP, self.KD
+        # Ensure that the mpc_fail flag is false before any MPC being solved
+        self.robot_states.mpc_fail = False
 
         # -------------------------------------------------
         # Handle transitions

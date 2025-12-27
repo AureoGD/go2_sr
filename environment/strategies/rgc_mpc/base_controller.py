@@ -131,6 +131,7 @@ class BaseRGC:
         self.prob = osqp.OSQP()
         self.op_init = False
         self.first_int = True
+        self.check_dqr = False
         self.min_obj_val = 100
 
         self.convergence_threshold = 0.15
@@ -214,15 +215,18 @@ class BaseRGC:
 
     def _handle_mpc_success(self, res):
         """Helper to handle MPC success."""
+        self.dqr = res.x[0:self.nu]
         is_complete = self.task_finish_detect.is_task_complete(abs(res.info.obj_val))
-        if is_complete:
-            pass
+        # if is_complete:
+        #     pass
+        if self.check_dqr is True and abs(sum(self.dqr)) < 0.003:
+            is_complete = True
         self.robot_states.subtask_succes = is_complete
 
         self.robot_states.mpc_obj_val = res.info.obj_val
         self.robot_states.mpc_fail = False
         self.robot_states.critical_mpc_fail = False
-        self.dqr = res.x[0:self.nu]
+
         return self.dqr
 
     def update_model(self):

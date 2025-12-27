@@ -4,10 +4,10 @@ from scipy.linalg import block_diag
 from environment.strategies.rgc_mpc.base_controller import BaseRGC
 
 
-class LandingCW(BaseRGC):
+class EndLandingCW(BaseRGC):
 
-    TASK_NAME = "landing_cw"
-    TASK_LEVEL = 4
+    TASK_NAME = "end_landing_cw"
+    TASK_LEVEL = 5
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -19,15 +19,13 @@ class LandingCW(BaseRGC):
         self.N = 20
         self.M = 10
         self.ts = 0.01
-        self.ws = 10
-        self.convergence_threshold = 0.05
 
         self._update_detector()
 
         self.nx = 23
         self.nu = 12
-        self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
-        self.nc = 13  # max joint pos, GRF pivot
+        self.ny = 12
+        self.nc = 12  # max joint pos
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
         self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
@@ -42,50 +40,32 @@ class LandingCW(BaseRGC):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[0:4, 18:22] = np.eye(4)
-        self.Ca[4:7, 6:9] = np.eye(3)
-        self.Ca[7:10, 12:15] = np.eye(3)
-        self.Ca[10, 0] = 1
-        # self.Ca[12, 16] = 1
+        self.Ca[:, 3:15] = np.eye(12)
 
         self.C_cons[0:12, 3:15] = np.identity(12)
         # self.C_cons[:, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qeps = 5 * np.diag(np.array([1, 1, 1, 1]))
-        Qfl = np.diag(np.array([0.0001, 0.0001, 0.0001]))
-        Qrl = np.diag(np.array([0.0001, 0.0001, 0.0001]))
-        Qroll = 0.1
+        Qfl = np.diag(np.array([0.01, 0.01, 0.01]))
+        Qrl = np.diag(np.array([0.01, 0.01, 0.01]))
 
-        Q = block_diag(Qeps, Qfl, Qrl, Qroll)
+        Q = block_diag(Qfl, Qfl, Qfl, Qfl)
 
-        self.Q1 = block_diag(*[Q] * self.N)
-
-        Qfl = np.diag(np.array([0.1, 0.1, 0.1]))
-        Qrl = np.diag(np.array([0.1, 0.1, 0.1]))
-
-        Q = block_diag(Qeps, Qfl, Qrl, Qroll)
-
-        self.Q2 = block_diag(*[Q] * self.N)
-
-        self.Q = self.Q1
+        self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rdqrfr = np.diag(np.array([5, 1000, 1000]))
-        Rdqrfl = 8 * np.diag(np.array([4, 4, 4]))
-        Rdqrr = np.diag(np.array([2, 1000, 1000]))
-        Rdqrl = 8 * np.diag(np.array([4, 4, 4]))
+        Rdqrfr = np.diag(np.array([4, 4, 4]))
+        Rdqrfl = np.diag(np.array([4, 4, 4]))
+        Rdqrr = np.diag(np.array([4, 4, 4]))
+        Rdqrl = np.diag(np.array([4, 4, 4]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
 
-        eps_ref = np.array([0, 0, 0, 1]).reshape(4, 1)
-        qref = np.array([0.2, 1.0, -1.5, 0.2, 1.0, -1.5]).reshape(6, 1)
+        qref = np.array([1.05, 1.5, -2.7, -0.85, 1.4, -2.7, 1.05, 1.5, -2.7, -0.9, 1.4, -2.7]).reshape(12, 1)
 
-        ref = np.vstack((eps_ref, qref, 0))
-
-        self.ref = np.tile(ref, (self.N, 1))
+        self.ref = np.tile(qref, (self.N, 1))
 
         qr_l = np.array([
             -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
@@ -118,15 +98,10 @@ class LandingCW(BaseRGC):
 
         self.first_int = True
 
-        self.active = 1
+        self.active = 0
         self.safe_side = False
 
     def update_model(self):
-        if self.safe_side and self.active == 1:
-            self.task_finish_detect.reset()
-            self.check_dqr = True
-            self.active = 0
-            self.Q = self.Q2
 
         q, dq = self.ordering_joints()
 
@@ -258,45 +233,11 @@ class LandingCW(BaseRGC):
 
     def define_constraints_matrices(self):
 
-        # --- PART 1: DEFINE STRUCTURE (Once) ---
         if self.first_int:
-            plane_normal, _ = self.get_best_fit_normal(self.contacts)
-
-            pivot_vec = self.contacts[2] - self.contacts[3]
-            pivot_dir = pivot_vec / np.linalg.norm(pivot_vec)
-
-            vec_vertical = np.array([0, 0, 1])
-
-            n_stab = np.cross(vec_vertical, pivot_vec)
-            n_stab = n_stab / np.linalg.norm(n_stab)
-
-            self.C_cons[12, 15:18] = n_stab
-
-            self.pivot_offset = np.dot(n_stab, self.contacts[3])
-
-            q_ref, R_ref = self.eps_reference(plane_normal=plane_normal, pivot_direction=pivot_dir)
-            self.ref.reshape(self.N, self.ny)[:, 0:4] = q_ref
-
-            l = np.vstack((self.qr_l, -np.inf))
-            u = np.vstack((self.qr_u, np.inf))
-            self.l = np.tile(l, (self.N, 1))
-            self.u = np.tile(u, (self.N, 1))
+            self.l = np.tile(self.qr_l, (self.N, 1))
+            self.u = np.tile(self.qr_u, (self.N, 1))
 
             self.first_int = False
-
-        curr_com = self.robot_states.r_pos.flatten()
-
-        curr_dist = np.dot(self.C_cons[12, 15:18], curr_com) - self.pivot_offset
-
-        if curr_dist < 0:
-            stability_lb = -np.inf
-        else:
-            self.safe_side = True
-            stability_lb = 0.0
-
-        l_reshaped = self.l.reshape(self.N, self.nc)
-        l_reshaped[:, 12] = stability_lb + self.pivot_offset
-        # self.l = l_reshaped.flatten()
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
@@ -305,15 +246,6 @@ class LandingCW(BaseRGC):
         aux_cons = self.C_cons @ self.Ba
 
         return aux_cons, Phi_cons
-
-    def reset_controller(self):
-        if self.task_finish_detect is not None:
-            self.task_finish_detect.reset()
-        self.first_int = True
-        self.active = 1
-        self.safe_side = False
-        self.prob = None
-        self.Q = self.Q1
 
     def center_of_mass_constraint(self):
         l = (self.robot_states.r_pos[0:2, 0]).reshape(2, 1) - 0.1 * np.ones((2, 1))

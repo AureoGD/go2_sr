@@ -58,7 +58,8 @@ class GoSafe(BaseRGC):
         R = block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
         self.R = block_diag(*[R] * self.M)
 
-        qr = np.array([[0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]]).transpose()
+        # qr = np.array([[0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]]).transpose()
+        qr = np.array([[0.9, 1.4, -2.7, -0.9, 1.4, -2.7, 0.9, 1.4, -2.7, -0.9, 1.4, -2.7]]).transpose()
         self.ref = np.tile(qr, (self.N, 1))
 
         qr_l = np.array([

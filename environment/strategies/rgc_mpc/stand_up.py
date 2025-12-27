@@ -234,8 +234,8 @@ class StandUpPhase(BaseRGC):
             epsRef, _ = self.eps_reference(
                 current_yaw=yaw,
                 desired_yaw=None  # Keep current yaw
-            ).reshape(4, 1)
-
+            )
+            epsRef = epsRef.reshape(4, 1)
             rzRef = self.robot_states.r_pos[2] + np.array([[0.2]]).reshape(1, 1)
             dr_ref = np.zeros((3, 1))
             ref = np.vstack((rzRef, epsRef, dr_ref))
