@@ -62,8 +62,9 @@ class PrepareCW(BaseRGC):
         self.n_local = np.array([0.0, 0.0, 1.0])
         self.p_offset_local = np.array([0.0, 0.0, 0.05])
 
-        Qq = 1 * np.eye(11)
-
+        Qq = 0.1 * np.eye(11)
+        Qq[0, 0] = 1
+        Qq[6, 6] = 1
         Qpc = block_diag(0.001, 0.001, 4)
 
         Q = block_diag(Qq, Qpc)
@@ -80,7 +81,7 @@ class PrepareCW(BaseRGC):
 
         # qr = np.array([[-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.25, -2.0, -0.9, 4.45, -2.5]]).transpose()
 
-        qr = np.array([[-0.9, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, 4.45, -2.5]]).transpose()
+        qr = np.array([[-0.8, 1.5, -2.0, -0.8, 1.0, -2.6, -0.8, 1.5, -2.0, 4.45, -2.5]]).transpose()
         ref = np.vstack((qr, np.zeros((3, 1))))
         self.ref = np.tile(ref, (self.N, 1))
 

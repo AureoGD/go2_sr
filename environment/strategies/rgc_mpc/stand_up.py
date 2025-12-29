@@ -56,9 +56,9 @@ class StandUpPhase(BaseRGC):
         self.L[:, 6:18] = -self.kp * np.identity(12)
         self.L[:, 26:] = self.kp * np.identity(12)
 
-        Qrz = np.array([10])
+        Qrz = np.array([5])
         Qeps = 1.5 * np.eye(4)
-        Qdr = 1 * np.eye(3)
+        Qdr = 2 * np.eye(3)
         Q = block_diag(Qrz, Qeps, Qdr)
 
         self.Q = block_diag(*[Q] * self.N)
@@ -78,7 +78,7 @@ class StandUpPhase(BaseRGC):
 
         # GRF vector:
         # Constraints for one foot
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 30])
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 35])
         foot_u = np.array([0, 0, np.inf, np.inf, 100])
 
         # Stack for all 4 feet
@@ -212,19 +212,23 @@ class StandUpPhase(BaseRGC):
         n_rr, t1_rr, t2_rr = self.cont_surfaces(self.contacts[2, :], self.contacts[3, :], self.contacts[0, :])
         n_rl, t1_rl, t2_rl = self.cont_surfaces(self.contacts[3, :], self.contacts[0, :], self.contacts[1, :])
 
-        mu = 0.9 / np.sqrt(2)
+        mu = 0.7 / np.sqrt(2)
 
         Cf_fr = self.cf_matrix(n_fr, t1_fr, t2_fr, mu)
         Cf_fl = self.cf_matrix(n_fl, t1_fl, t2_fl, mu)
         Cf_rr = self.cf_matrix(n_rr, t1_rr, t2_rr, mu)
         Cf_rl = self.cf_matrix(n_rl, t1_rl, t2_rl, mu)
 
-        Cf = block_diag(Cf_fl, Cf_fr, Cf_rr, Cf_rl)
+        Cf = block_diag(Cf_fr, Cf_fl, Cf_rr, Cf_rl)
         Fc_mtx = -Cf @ self.Jinv
-        aux_cons[0:2, :] = self.C_cons[0:2, :] @ self.Ba
-        aux_cons[2:, :] = self.kp * Fc_mtx
         self.C_cons[2:, :] = Fc_mtx @ self.L
         Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
+        aux_cons = self.C_cons @ self.Ba
+
+        # aux_cons[0:2, :] = self.C_cons[0:2, :] @ self.Ba
+        # aux_cons[2:, :] = self.kp * Fc_mtx
+        # self.C_cons[2:, :] = Fc_mtx @ self.L
+        # Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
 
         if self.first_int:
             yaw = self.robot_states.rpy[2, 0]

@@ -26,8 +26,9 @@ class LandingCW(BaseRGC):
 
         self.nx = 23
         self.nu = 12
-        self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
-        self.nc = 13  # max joint pos, GRF pivot
+        # self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
+        self.ny = 12
+        self.nc = 12  # max joint pos, GRF pivot
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
         self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
@@ -42,50 +43,55 @@ class LandingCW(BaseRGC):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[0:4, 18:22] = np.eye(4)
-        self.Ca[4:7, 6:9] = np.eye(3)
-        self.Ca[7:10, 12:15] = np.eye(3)
-        self.Ca[10, 0] = 1
+        self.Ca[:, 3:15] = np.eye(12)
         # self.Ca[12, 16] = 1
 
-        self.C_cons[0:12, 3:15] = np.identity(12)
+        self.C_cons[0:12, 23:] = np.identity(12)
         # self.C_cons[:, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qeps = 5 * np.diag(np.array([1, 1, 1, 1]))
-        Qfl = np.diag(np.array([0.0001, 0.0001, 0.0001]))
-        Qrl = np.diag(np.array([0.0001, 0.0001, 0.0001]))
-        Qroll = 0.1
+        # Qeps = 2.5 * np.diag(np.array([1, 1, 1, 1]))
+        # Qfl = np.diag(np.array([0.0001, 0.0001, 0.0001]))
+        # Qrl = np.diag(np.array([0.0001, 0.0001, 0.0001]))
+        # Qroll = 0.00000001
 
-        Q = block_diag(Qeps, Qfl, Qrl, Qroll)
+        # Q = block_diag(Qeps, Qfl, Qrl, Qroll)
 
-        self.Q1 = block_diag(*[Q] * self.N)
+        # self.Q1 = block_diag(*[Q] * self.N)
 
-        Qfl = np.diag(np.array([0.1, 0.1, 0.1]))
-        Qrl = np.diag(np.array([0.1, 0.1, 0.1]))
+        # Qfl = np.diag(np.array([0.1, 0.1, 0.1]))
+        # Qrl = np.diag(np.array([0.1, 0.1, 0.1]))
 
-        Q = block_diag(Qeps, Qfl, Qrl, Qroll)
+        # Q = block_diag(Qeps, Qfl, Qrl, Qroll)
 
-        self.Q2 = block_diag(*[Q] * self.N)
+        # self.Q2 = block_diag(*[Q] * self.N)
 
-        self.Q = self.Q1
+        # self.Q = self.Q1
+
+        Qfl = np.diag(np.array([1, 1, 1]))
+        Qrl = np.diag(np.array([1, 1, 1]))
+
+        Q = block_diag(Qrl, Qfl, Qrl, Qfl)
+        self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rdqrfr = np.diag(np.array([5, 1000, 1000]))
-        Rdqrfl = 8 * np.diag(np.array([4, 4, 4]))
-        Rdqrr = np.diag(np.array([2, 1000, 1000]))
-        Rdqrl = 8 * np.diag(np.array([4, 4, 4]))
+        Rdqrfr = np.diag(np.array([1, 1, 1]))
+        Rdqrfl = np.diag(np.array([1, 1, 1]))
+        Rdqrr = np.diag(np.array([1, 1, 1]))
+        Rdqrl = np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
 
-        eps_ref = np.array([0, 0, 0, 1]).reshape(4, 1)
-        qref = np.array([0.2, 1.0, -1.5, 0.2, 1.0, -1.5]).reshape(6, 1)
+        # eps_ref = np.array([0, 0, 0, 1]).reshape(4, 1)
+        # qref = np.array([0.2, 1.0, -1.5, 0.2, 1.0, -1.5]).reshape(6, 1)
 
-        ref = np.vstack((eps_ref, qref, 0))
+        # ref = np.vstack((eps_ref, qref, 0))
+        # qr = np.array([-0.2, 1.5, -2.0, -0.8, 1.0, -2.6, -0.2, 1.5, -2.0, 0.6, 3.75, -1.5]).reshape(12, 1)
+        qr = np.array([-0.4, 1.5, -2.0, -0.8, 1.0, -2.6, -0.4, 1.5, -2.0, 0.4, 3.75, -1.5]).reshape(12, 1)
 
-        self.ref = np.tile(ref, (self.N, 1))
+        self.ref = np.tile(qr, (self.N, 1))
 
         qr_l = np.array([
             -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
@@ -95,13 +101,6 @@ class LandingCW(BaseRGC):
 
         self.qr_l = qr_l.reshape(12, 1)
         self.qr_u = qr_u.reshape(12, 1)
-
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 0])
-        foot_u = np.array([0, 0, np.inf, np.inf, np.inf])
-
-        # Stack for all 4 feet
-        self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))  # Shape: (5, 1)
-        self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))  # Shape: (5, 1)
 
         self.Jinv = np.zeros((12, 12), dtype=np.float32)
 
@@ -122,11 +121,6 @@ class LandingCW(BaseRGC):
         self.safe_side = False
 
     def update_model(self):
-        if self.safe_side and self.active == 1:
-            self.task_finish_detect.reset()
-            self.check_dqr = True
-            self.active = 0
-            self.Q = self.Q2
 
         q, dq = self.ordering_joints()
 
@@ -196,11 +190,7 @@ class LandingCW(BaseRGC):
         Jc[9:12, 9:12] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('RL_foot'),
                                                   pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 12:15]
         pc_rl = self.data.oMf[self.model.getFrameId('RL_foot')].translation
-
-        if self.active == 1:
-            cross_rl = self.skew_symmetric_matrix(pc_rl - c_pivot)
-        else:
-            cross_rl = self.skew_symmetric_matrix(pc_rl - pc_rl)
+        cross_rl = self.skew_symmetric_matrix(pc_rl - pc_rl)
 
         self.contacts[0, :] = pc_fr
         self.contacts[1, :] = pc_rr
@@ -209,8 +199,8 @@ class LandingCW(BaseRGC):
 
         J_pivot_stacked = np.vstack((J_pivot, J_pivot, J_pivot, J_pivot))
         gamma = Jc - J_pivot_stacked
-        gamma[3:6, :] = np.hstack((np.zeros((3, 3)), (np.eye(3)), np.zeros((3, 6))))
-        # gamma[9:, :] = np.hstack((np.zeros((3, 9)), (np.eye(3))))
+        gamma[3:6, :] = np.hstack((np.zeros((3, 3)), np.eye(3), np.zeros((3, 6))))
+        gamma[9:12, :] = np.hstack((np.zeros((3, 9)), np.eye(3)))
         Sa = np.vstack((cross_fr, cross_fl, cross_rr, cross_rl))
 
         gamma_a_star = np.linalg.inv(gamma) @ Sa
@@ -226,13 +216,14 @@ class LandingCW(BaseRGC):
 
         comp_grav = S @ np.array((0, 0, mass))
 
-        self.Jinv = np.linalg.inv(Jc)
+        self.Jinv = np.linalg.inv(Jc.T)
 
         k3 = self.kp * Iinv @ Sa.T @ self.Jinv
         k4 = self.kd * Iinv @ Sa.T @ self.Jinv
 
-        self.A[0:3, 0:3] = k4 @ gamma_a_star
+        self.A[0:3, 0:3] = k4 @ gamma_a_star  # -kd*dq
         self.A[0:3, 3:15] = k3
+        self.A[0:3, 22] = Iinv @ comp_grav
 
         self.A[3:15, 0:3] = gamma_a_star
 
@@ -248,10 +239,10 @@ class LandingCW(BaseRGC):
         self.Ba[0:23, :] = self.ts * self.B
 
         self.Ba[6:9, 3:6] = np.eye(3)
-        self.Ba[12:15, 9:12] = np.eye(3) * (1 - self.active)
+        self.Ba[12:15, 9:12] = np.eye(3)
 
         self.Ba[15:18, 3:6] = J_com[:, 3:6]
-        self.Ba[15:18, 9:12] = J_com[:, 9:] * (1 - self.active)
+        self.Ba[15:18, 9:12] = J_com[:, 9:]
 
         self.x = np.vstack((self.robot_states.omega, self.robot_states.q, self.robot_states.r_pos,
                             self.robot_states.epsilon, -9.81, self.robot_states.qr))
@@ -260,43 +251,45 @@ class LandingCW(BaseRGC):
 
         # --- PART 1: DEFINE STRUCTURE (Once) ---
         if self.first_int:
-            plane_normal, _ = self.get_best_fit_normal(self.contacts)
+            # plane_normal, _ = self.get_best_fit_normal(self.contacts)
 
-            pivot_vec = self.contacts[2] - self.contacts[3]
-            pivot_dir = pivot_vec / np.linalg.norm(pivot_vec)
+            # pivot_vec = self.contacts[2] - self.contacts[3]
+            # pivot_dir = pivot_vec / np.linalg.norm(pivot_vec)
 
-            vec_vertical = np.array([0, 0, 1])
+            # vec_vertical = np.array([0, 0, 1])
 
-            n_stab = np.cross(vec_vertical, pivot_vec)
-            n_stab = n_stab / np.linalg.norm(n_stab)
+            # n_stab = np.cross(vec_vertical, pivot_vec)
+            # n_stab = n_stab / np.linalg.norm(n_stab)
 
-            self.C_cons[12, 15:18] = n_stab
+            # self.C_cons[12, 15:18] = n_stab
 
-            self.pivot_offset = np.dot(n_stab, self.contacts[3])
+            # self.pivot_offset = np.dot(n_stab, self.contacts[3])
 
-            q_ref, R_ref = self.eps_reference(plane_normal=plane_normal, pivot_direction=pivot_dir)
-            self.ref.reshape(self.N, self.ny)[:, 0:4] = q_ref
+            # q_ref, R_ref = self.eps_reference(plane_normal=plane_normal, pivot_direction=pivot_dir)
+            # self.ref.reshape(self.N, self.ny)[:, 0:4] = q_ref
 
-            l = np.vstack((self.qr_l, -np.inf))
-            u = np.vstack((self.qr_u, np.inf))
+            # l = np.vstack((self.qr_l, -np.inf))
+            # u = np.vstack((self.qr_u, np.inf))
+            l = self.qr_l
+            u = self.qr_u
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
 
             self.first_int = False
 
-        curr_com = self.robot_states.r_pos.flatten()
+        # curr_com = self.robot_states.r_pos.flatten()
 
-        curr_dist = np.dot(self.C_cons[12, 15:18], curr_com) - self.pivot_offset
+        # curr_dist = np.dot(self.C_cons[12, 15:18], curr_com) - self.pivot_offset
 
-        if curr_dist < 0:
-            stability_lb = -np.inf
-        else:
-            self.safe_side = True
-            stability_lb = 0.0
+        # if curr_dist < 0:
+        #     stability_lb = -np.inf
+        # else:
+        #     self.safe_side = True
+        #     stability_lb = 0.0
 
-        l_reshaped = self.l.reshape(self.N, self.nc)
-        l_reshaped[:, 12] = stability_lb + self.pivot_offset
-        # self.l = l_reshaped.flatten()
+        # l_reshaped = self.l.reshape(self.N, self.nc)
+        # l_reshaped[:, 12] = stability_lb + self.pivot_offset
+        # # self.l = l_reshaped.flatten()
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
@@ -313,7 +306,7 @@ class LandingCW(BaseRGC):
         self.active = 1
         self.safe_side = False
         self.prob = None
-        self.Q = self.Q1
+        # self.Q = self.Q1
 
     def center_of_mass_constraint(self):
         l = (self.robot_states.r_pos[0:2, 0]).reshape(2, 1) - 0.1 * np.ones((2, 1))

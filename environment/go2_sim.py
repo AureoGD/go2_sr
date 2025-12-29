@@ -238,6 +238,7 @@ class Go2ModelSimMuJoCo():
         self.robot_states.epsilon = np.array(
             (self.data.qpos[4], self.data.qpos[5], self.data.qpos[6], self.data.qpos[3])).reshape(4, 1)
         self.robot_states.omega = self.data.qvel[3:6].reshape(3, 1)
+        self.robot_states.rpy = self._quat_to_euler(self.robot_states.epsilon).reshape(3, 1)
 
         self._assert_finite("robot_states.q", self.robot_states.q)
         self._assert_finite("robot_states.dq", self.robot_states.dq)
@@ -327,6 +328,31 @@ class Go2ModelSimMuJoCo():
         quat_xyzw = r.as_quat()
         quat_wxyz = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
         return quat_wxyz
+
+    def _quat_to_euler(self, q):
+        """
+        Converts a quaternion [x, y, z, w] to RPY [roll, pitch, yaw].
+        """
+        x, y, z, w = q
+
+        # Roll (x-axis rotation)
+        sinr_cosp = 2 * (w * x + y * z)
+        cosr_cosp = 1 - 2 * (x * x + y * y)
+        roll = np.arctan2(sinr_cosp, cosr_cosp)
+
+        # Pitch (y-axis rotation)
+        sinp = 2 * (w * y - z * x)
+        if abs(sinp) >= 1:
+            pitch = np.sign(sinp) * np.pi / 2  # Gimbal lock fallback
+        else:
+            pitch = np.arcsin(sinp)
+
+        # Yaw (z-axis rotation)
+        siny_cosp = 2 * (w * z + x * y)
+        cosy_cosp = 1 - 2 * (y * y + z * z)
+        yaw = np.arctan2(siny_cosp, cosy_cosp)
+
+        return np.array([roll, pitch, yaw])
 
     # ========================================================
     # RESET / CLOSE (UNCHANGED)

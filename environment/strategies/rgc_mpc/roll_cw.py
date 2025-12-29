@@ -43,7 +43,7 @@ class RollCW(BaseRGC):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:, 29:] = np.identity(12)
+        self.Ca[:, 6:18] = np.identity(12)
 
         self.contacts = np.zeros((3, 3), dtype=np.float32)
 
