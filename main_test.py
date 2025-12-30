@@ -87,8 +87,8 @@ def main():
         for ep in range(5):
             print(f"\n--- Episode {ep + 1} ---")
             # r0 = [np.pi, 0, -np.pi / 2]
-            r0 = [np.pi, 0, 0]
-            b0 = [0, 0, 0.3]
+            r0 = [np.pi, 0, -0.5]
+            b0 = [3, 0, 0.2]
             # q0 = [0.2, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
             obs, info = env.reset(b0=b0, r0=r0)
             total_reward = 0.0
@@ -108,7 +108,7 @@ def main():
                     elif tick < 450:
                         action = 2
                     elif tick < 600:
-                        action = 3
+                        action = 4
                     elif tick < 900:
                         action = 4
                     # elif tick < 1000:

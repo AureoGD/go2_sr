@@ -15,10 +15,9 @@ class PrepareCW():
         qr = np.array([-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, -0.5, 4.2, -2.25]).reshape(12, 1)
         prepare_to_rool2 = {'robot_states': self.robot_states, 'settling_time': 2, 't_cont': 0.01, 'qHL': qr}
         self.prepare_to_rool2 = SmoothFilter(**prepare_to_rool2)
-
-        # qr = np.array([0.6, 1.5, -2.0, -0.8, 1.0, -2.6, 0.6, 1.5, -2.0, 0.6, 3.75, -1.5]).reshape(12, 1)
-        # prepare_to_rool3 = {'robot_states': self.robot_states, 'settling_time': 2, 't_cont': 0.01, 'qHL': qr}
-        # self.prepare_to_rool3 = SmoothFilter(**prepare_to_rool3)
+        qr = np.array([0.6, 1.5, -2.0, -0.8, 1.0, -2.6, 0.6, 1.5, -2.0, 0.6, 3.75, -1.5]).reshape(12, 1)
+        prepare_to_rool3 = {'robot_states': self.robot_states, 'settling_time': 2, 't_cont': 0.01, 'qHL': qr}
+        self.prepare_to_rool3 = SmoothFilter(**prepare_to_rool3)
 
         self.reset_controller()
 
