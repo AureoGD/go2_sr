@@ -19,7 +19,7 @@ class Go2Env(gym.Env):
 
         self.max_step_limit = max_step
         self.current_step_limit = 300
-        self.time_extension = 300
+        self.time_extension = 350
 
         strategy_name = kwargs.get("strategy", "rgc")
         self.robot_sim = Go2ModelSimMuJoCo(render=self.rendering, strategy_name=strategy_name, **kwargs)
@@ -51,10 +51,10 @@ class Go2Env(gym.Env):
         self.MAX_PHASE_COUNT = 15
 
         self.PROGRESS_MODES = {3, 5, 6}
-        self.JOINT_PROGRESS_MODES = {1, 2}
+        self.JOINT_PROGRESS_MODES = {1, 2, 4}
         self.JOINT_PROGRESS_EPS = 0.01
 
-        self.min_upright_height = 0.15
+        self.min_upright_height = 0.2
 
         self.stagnation_counter = 0
         self.joint_stagnation_counter = 0

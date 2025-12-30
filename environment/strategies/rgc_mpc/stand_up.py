@@ -6,7 +6,7 @@ from environment.strategies.rgc_mpc.base_controller import BaseRGC
 
 class StandUpPhase(BaseRGC):
     TASK_NAME = "stand"
-    TASK_LEVEL = 5
+    TASK_LEVEL = 6
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -17,7 +17,8 @@ class StandUpPhase(BaseRGC):
         self.N = 20
         self.M = 10
         self.ts = 0.01
-        self.convergence_threshold = 0.23
+        self.convergence_threshold = 0.05
+        self.ws = 20
         self._update_detector()
 
         self.nx = 26
@@ -56,9 +57,9 @@ class StandUpPhase(BaseRGC):
         self.L[:, 6:18] = -self.kp * np.identity(12)
         self.L[:, 26:] = self.kp * np.identity(12)
 
-        Qrz = np.array([5])
+        Qrz = np.array([10])
         Qeps = 1.5 * np.eye(4)
-        Qdr = 2 * np.eye(3)
+        Qdr = 1 * np.eye(3)
         Q = block_diag(Qrz, Qeps, Qdr)
 
         self.Q = block_diag(*[Q] * self.N)

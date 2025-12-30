@@ -87,8 +87,8 @@ def main():
         for ep in range(5):
             print(f"\n--- Episode {ep + 1} ---")
             # r0 = [np.pi, 0, -np.pi / 2]
-            r0 = [np.pi, 0, -0.5]
-            b0 = [3, 0, 0.2]
+            r0 = [np.pi, 0, 0.25]
+            b0 = [0, 0, 0.2]
             # q0 = [0.2, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
             obs, info = env.reset(b0=b0, r0=r0)
             total_reward = 0.0
@@ -103,18 +103,20 @@ def main():
                         action, _ = policy.predict(obs, deterministic=True)
                         action = int(action)
                 else:
-                    if tick < 150:
+                    if tick < 20:
+                        action = 0
+                    elif tick < 170:
                         action = 1
-                    elif tick < 450:
+                    elif tick < 400:
                         action = 2
-                    elif tick < 600:
-                        action = 4
+                    elif tick < 650:
+                        action = 3
                     elif tick < 900:
                         action = 4
-                    # elif tick < 1000:
-                    #     action = 5
-                    # elif tick < 1200:
-                    #     action = 6
+                    elif tick < 1150:
+                        action = 5
+                    elif tick < 1400:
+                        action = 6
                     else:
                         action = 0
 

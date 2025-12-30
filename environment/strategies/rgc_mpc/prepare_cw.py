@@ -19,7 +19,8 @@ class PrepareCW(BaseRGC):
         self.N = 20
         self.M = 15
         self.ts = 0.01
-        self.convergence_threshold = 0.08
+        self.convergence_threshold = 0.1
+        self.ws = 30
         self._update_detector()
 
         self.nx = 27

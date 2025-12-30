@@ -2,7 +2,6 @@ import numpy as np
 import pinocchio as pin
 from scipy.linalg import block_diag
 from environment.strategies.rgc_mpc.base_controller import BaseRGC
-from scipy.spatial import ConvexHull
 
 
 class RollCW(BaseRGC):
@@ -14,18 +13,22 @@ class RollCW(BaseRGC):
         super().__init__(**kwargs)
 
         if not self.runtime:
+            # Metadata-only: nothing else to do
             return
 
         self.N = 20
-        self.M = 15
+        self.M = 10
         self.ts = 0.01
+        self.ws = 30
+        self.convergence_threshold = 0.28
 
         self._update_detector()
 
-        self.nx = 29
+        self.nx = 23
         self.nu = 12
+        # self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
         self.ny = 12
-        self.nc = 5  #GRF
+        self.nc = 12  # max joint pos, GRF z component
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
         self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
@@ -36,71 +39,64 @@ class RollCW(BaseRGC):
 
         self.C_cons = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
 
-        self.A[18:21, 0:3] = np.identity(3)
-        self.A[2, 25] = 1
-
         self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:, 6:18] = np.identity(12)
+        self.Ca[:, 3:15] = np.eye(12)
+        # self.Ca[12, 16] = 1
 
-        self.contacts = np.zeros((3, 3), dtype=np.float32)
+        self.C_cons[0:12, 23:] = np.identity(12)
 
-        self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3)), axis=1)
+        self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qqr = 0.5 * np.eye(12)
+        Qfl = np.diag(np.array([1, 1, 1]))
+        Qrl = np.diag(np.array([1, 1, 1]))
 
-        Q = block_diag(Qqr)
-
+        Q = block_diag(Qrl, Qfl, Qrl, Qfl)
         self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rdqrfr = np.diag(np.array([1, 1, 1]))
+        Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
         Rdqrfl = np.diag(np.array([1, 1, 1]))
-        Rdqrr = np.diag(np.array([1, 1, 1]))
-        Rdqrl = np.diag(np.array([1, 1, 1]))
+        Rdqrr = 750 * np.diag(np.array([1, 10, 10]))
+        Rdqrl = 75 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
-        self.R = 10 * block_diag(*[R] * self.M)
+        self.R = block_diag(*[R] * self.M)
+        qr = np.array([0.4, 1.5, -2.0, -0.8, 1.0, -2.6, 0.4, 1.5, -2.0, 0.4, 3.75, -1.5]).reshape(12, 1)
 
-        # -0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.25, -2.0
+        self.ref = np.tile(qr, (self.N, 1))
 
-        # qrRef = np.array([-0.25, 0.90, -2.85, -0.85, 0.85, -1.3, -0.25, 0.90, -2.85, 0.6, 3.75, -1.5]).reshape(12, 1)
-        qrRef = np.array([-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, 0.6, 3.75, -1.5]).reshape(12, 1)
+        qr_l = np.array([
+            -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
+        ])
+        qr_u = np.array(
+            [1.0472, 3.4907, -0.83776, 1.0472, 3.4907, -0.83776, 1.0472, 4.5379, -0.83776, 1.0472, 4.5379, -0.83776])
 
-        ref = np.vstack((qrRef))
+        self.qr_l = qr_l.reshape(12, 1)
+        self.qr_u = qr_u.reshape(12, 1)
 
-        self.ref = np.tile(ref, (self.N, 1))
-
-        self.L = np.zeros((3, self.nx + self.nu))
-        self.L[0:3, 15:18] = -self.kp * np.identity(3)
-        self.L[0:3, 38:] = self.kp * np.identity(3)
-
-        # Constraints for one foot
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 40])
-        foot_u = np.array([0, 0, np.inf, np.inf, 200])
-
-        # Only RL foot
-        self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))  # Shape: (15, 1)
-        self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))  # Shape: (15, 1)
-
-        self.Jinv = np.zeros((9, 9), dtype=np.float32)
+        self.Jinv = np.zeros((12, 12), dtype=np.float32)
 
         # (FR=3, FL=0, RR=9, RL=6)
         # Contact at front-right foot, rear-right foot and rear-left foot
-        self.leg_idx = [3, 9, 6]
+        self.leg_idx = [3, 9]
 
         self.contact_ids = [
             self.model.getFrameId('FR_thigh_joint'),
             self.model.getFrameId('RR_thigh_joint'),
-            self.model.getFrameId('RL_foot'),
         ]
 
+        self.contacts = np.zeros((4, 3), dtype=np.float32)
+
         self.first_int = True
-        self.min_obj_val = 0.75
+
+        self.active = 1
+        self.safe_side = False
 
     def update_model(self):
+
         q, dq = self.ordering_joints()
 
         # 1. COMPUTE ALL KINEMATICS (Positions and Velocities)
@@ -115,8 +111,15 @@ class RollCW(BaseRGC):
         # 3. COMPUTE ALL CENTROIDAL QUANTITIES
         pin.ccrba(self.model, self.data, q, dq)
 
-        M = self.data.M[6:9, 6:9]
-        C = self.data.C[6:9, 6:9]
+        J_com_full = pin.jacobianCenterOfMass(self.model, self.data, q, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[:, 6:]
+
+        J_com = np.hstack([
+            J_com_full[:, 3:6],  # front-right leg
+            J_com_full[:, 0:3],  # front-left
+            J_com_full[:, 9:12],  # rear-right leg
+            J_com_full[:, 6:9]  # rear-left leg
+        ])
+
         r = self.data.com[0]
         dr = self.data.vcom[0]
 
@@ -125,255 +128,94 @@ class RollCW(BaseRGC):
         self.robot_states.r_pos = r.reshape(3, 1)
 
         # Update angular velocity to quaternions matrix
+
         x, y, z, w = self.robot_states.epsilon
         T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
 
-        # Get Centroidal Inertia's 3x3 rotational part
-        I = self.data.Ig.inertia
-        Iinv = np.linalg.inv(I)
+        pivot_fr = self.data.oMf[self.model.getFrameId('FR_hip_joint')].translation
+        pivot_rr = self.data.oMf[self.model.getFrameId('RR_hip_joint')].translation
+        mean_pivot = (pivot_fr + pivot_rr) / 2
 
-        # Get CoM Jacobian (from step 3)
-        J_com_full = self.data.Jcom[0:3, 6:]
+        Jc = np.zeros((12, 12))
+        Jc[0:3, 0:3] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('FR_foot'),
+                                                pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 9:12]
+        foot_fr = self.data.oMf[self.model.getFrameId('FR_foot')].translation
+        cross_fr = self.skew_symmetric_matrix(foot_fr - pivot_fr)
 
-        J_com = np.hstack([
-            J_com_full[:, self.leg_idx[0]:self.leg_idx[0] + 3],  # front-lef leg
-            J_com_full[:, self.leg_idx[1]:self.leg_idx[1] + 3],  # rind-right leg
-            J_com_full[:, self.leg_idx[2]:self.leg_idx[2] + 3]  # rind-left leg
-        ])
+        Jc[3:6:, 3:6] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('FL_foot'),
+                                                 pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6:9]
 
-        J_com_stacked = np.vstack([J_com, J_com, J_com])
+        Jc[6:9, 6:9] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('RR_foot'),
+                                                pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 15:18]
+        foot_rr = self.data.oMf[self.model.getFrameId('RR_foot')].translation
+        cross_rr = self.skew_symmetric_matrix(foot_rr - pivot_rr)
 
-        J_fl_com = np.vstack([J_com_full[:, 0:3], J_com_full[:, 0:3], J_com_full[:, 0:3], np.zeros((3, 3))])
+        Jc[9:12, 9:12] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('RL_foot'),
+                                                  pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 12:15]
+        foot_rl = self.data.oMf[self.model.getFrameId('RL_foot')].translation
+        cross_rl = self.skew_symmetric_matrix(foot_rl - mean_pivot)
 
-        # --- 3. Build the 9x9 Gamma (Gamma) and 9x3 Sa ---
-        Gamma = np.zeros((9, 9), dtype=np.float32)
-        Jc = np.zeros((9, 9), dtype=np.float32)
-        Sa = np.zeros((9, 3), dtype=np.float32)
+        cross_fl = np.zeros((3, 3))  # only to validate the rotation dynamics
+        Sa = np.vstack((cross_fr, cross_fl, cross_rr, cross_rl))
 
-        for i in range(3):
-            contact_id = self.contact_ids[i]
-            leg_q_start_idx = self.leg_idx[i]
+        gamma = Jc
+        gamma[3:6, :] = np.hstack((np.zeros((3, 3)), (np.eye(3)), np.zeros((3, 6))))
 
-            Jc_full = pin.computeFrameJacobian(self.model, self.data, q, contact_id,
-                                               pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6 + leg_q_start_idx:9 +
-                                                                                       leg_q_start_idx]
+        gamma_a_star = np.linalg.inv(gamma) @ Sa
 
-            Jc[i * 3:(i + 1) * 3, i * 3:(i + 1) * 3] = Jc_full
+        self.Jinv = np.linalg.inv(Jc.T)
 
-            contact_pos = self.data.oMf[contact_id].translation
-            Sa[i * 3:(i + 1) * 3, :] = self.skew_symmetric_matrix(contact_pos - r)
+        I_com = self.data.Ig.inertia
+        mass = self.data.mass[0]
 
-            self.contacts[i, :] = contact_pos
+        c_pivot = (pivot_fr + pivot_rr) / 2
+        lever = self.data.com[0] - c_pivot
+        S = self.skew_symmetric_matrix(lever)
 
-        # self.robot_states.contacts[0:3, :] = self.contacts
-        # self.robot_states.contacts[0, :] = self.data.oMf[self.model.getFrameId('FR_thigh_joint')].translation
-        # self.robot_states.contacts[1, :] = self.data.oMf[self.model.getFrameId('RR_thigh_joint')].translation
-        # self.robot_states.contacts[2, :] = self.data.oMf[self.model.getFrameId('RL_foot')].translation
+        I_pivot = I_com + mass * (S.T @ S)
+        I_inv = np.linalg.inv(I_pivot)
 
-        # Compute the 9x9 singular Gamma matrix
-        Gamma = J_com_stacked - Jc
+        comp_grav = S @ np.array([0, 0, mass])
+        term_grav = I_inv @ comp_grav
 
-        # --- 4. Build the 3x9 Loop Constraint (J_loop) ---
-        J_loop = np.zeros((3, 9), dtype=np.float32)
+        k3 = self.kp * I_inv @ gamma_a_star.T
+        k4 = self.kd * I_inv @ gamma_a_star.T
 
-        # Get 3x3 FR foot jacobian
-        J_fr_foot = pin.computeFrameJacobian(self.model, self.data, q, self.foot_ids[0],
-                                             pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6 + self.leg_idx[0]:9 +
-                                                                                     self.leg_idx[0]]
+        self.A[0:3, 0:3] = -k4 @ gamma_a_star
+        self.A[0:3, 3:15] = -k3
+        self.A[0:3, 22] = term_grav
 
-        # Get 3x3 RR foot jacobian
-        J_rr_foot = pin.computeFrameJacobian(self.model, self.data, q, self.foot_ids[2],
-                                             pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6 + self.leg_idx[1]:9 +
-                                                                                     self.leg_idx[1]]
+        self.A[3:15, 0:3] = gamma_a_star
 
-        # Build J_loop = [J_fr_foot| -J_rr_foot | 0 ]
-        J_loop[:, 0:3] = J_fr_foot  # Columns for FL leg
-        # Columns 3-5 are already zero (for RL leg)
-        J_loop[:, 3:6] = -J_rr_foot  # Columns for RL leg
+        self.A[15:18, 0:3] = -S + J_com @ gamma_a_star
 
-        # --- 5. Build and Solve the Stacked System ---
+        self.A[18:22, 0:3] = T.reshape(4, 3)
 
-        J_task = np.vstack([Gamma, J_loop])  # 12x9 matrix
-        J_task_plus = np.linalg.pinv(J_task)  # 9x12 pseudoinverse
+        self.B[0:3, :] = k3
 
-        # --- 6. Build the Right-Hand-Side Mappings ---
-        # Build the 12x3 linear mapping vector
-        I_stack = np.zeros((12, 3), dtype=np.float32)
-        I_stack[0:9, :] = np.vstack([np.eye(3), np.eye(3), np.eye(3)])  # 9x3 part
-        # The last 3x3 block is zero (for J_loop's 0 target)
+        self.Aa[0:23, 0:23] = np.identity(self.nx) + self.ts * self.A
+        self.Aa[0:23, 23:] = self.ts * self.B
 
-        # Build the 12x3 angular mapping vector
-        S_stack = np.zeros((12, 3), dtype=np.float32)
-        S_stack[0:9, :] = Sa  # 9x3 part
-        # The last 3x3 block is zero (for J_loop's 0 target)0
+        self.Ba[0:23, :] = self.ts * self.B
 
-        # --- 7. Calculate final gamma_l and gamma_a ---
-        # These are the final 9x3 mapping matrices for your 9x1 dq vector
-        gamma_l_star = J_task_plus @ I_stack
-        gamma_a_star = J_task_plus @ S_stack
-        gamma_q_star = J_task_plus @ J_fl_com
-
-        # self.Jinv = np.linalg.pinv(Jc.T)
-
-        self.Jinv[1, 0] = 0.9 / 0.1
-        self.Jinv[2, 0] = 1 / 0.1
-
-        self.Jinv[4, 3] = 0.9 / 0.1
-        self.Jinv[5, 3] = 1 / 0.1
-
-        J_rl = Jc[6:, 6:]
-        self.Jinv[6:, 6:] = np.linalg.inv(J_rl).T
-
-        k1 = (self.kp / self.total_mass) * self.Is @ self.Jinv
-        k2 = (self.kd / self.total_mass) * self.Is @ self.Jinv
-        k3 = self.kp * Iinv @ -Sa.T @ self.Jinv
-        k4 = self.kd * Iinv @ -Sa.T @ self.Jinv
-
-        self.A[0:3, 0:3] = k2 @ gamma_l_star
-        self.A[0:3, 3:6] = -k2 @ gamma_a_star
-        self.A[0:3, 6:9] = k1[:, 0:3]
-        self.A[0:3, 12:18] = k1[:, 3:]
-        self.A[0:3, 26:] = -k2 @ gamma_q_star
-
-        self.A[3:6, 0:3] = k4 @ gamma_l_star
-        self.A[3:6, 3:6] = -k4 @ gamma_a_star
-        self.A[3:6, 6:9] = k3[:, 0:3]
-        self.A[3:6, 12:18] = k3[:, 3:]
-        self.A[3:6, 26:] = -k4 @ gamma_q_star
-
-        self.A[6:9, 0:3] = gamma_l_star[0:3, :]
-        self.A[6:9, 3:6] = -gamma_a_star[0:3, :]
-        self.A[6:9, 26:] = -gamma_q_star[0:3, :]
-
-        # q_fl is junst the integral of dq_fl
-        self.A[9:12, 26:] = np.eye(3)
-
-        self.A[12:18, 0:3] = gamma_l_star[3:, :]
-        self.A[12:18, 3:6] = -gamma_a_star[3:, :]
-        self.A[12:18, 26:] = -gamma_q_star[3:, :]
-
-        self.A[21:25, 3:6] = T.reshape(4, 3)
-
-        M_inv = np.linalg.inv(M)
-
-        self.A[26:, 9:12] = -M_inv * self.kp
-        self.A[26:, 26:] = -M_inv @ (C + self.kd / 10 * np.eye(3))
-
-        self.B[0:3, 0:3] = -k1[:, 0:3]
-        self.B[0:3, 6:] = -k1[:, 3:]
-
-        self.B[3:6, 0:3] = -k3[:, 0:3]
-        self.B[3:6, 6:] = -k3[:, 3:]
-
-        self.B[26:, 3:6] = self.kp * M_inv
-
-        self.Aa[0:self.nx, 0:self.nx] = np.identity(self.nx) + self.ts * self.A
-        self.Aa[0:self.nx, self.nx:] = self.ts * self.B
-
-        self.Ba[0:self.nx, :] = self.ts * self.B
-
-        self.x = np.vstack(
-            (self.robot_states.r_vel, self.robot_states.omega, self.robot_states.q, self.robot_states.r_pos,
-             self.robot_states.epsilon, -9.81, self.robot_states.dq[3:6], self.robot_states.qr))
-
-        # RL
-        self.L[:, 0:3] = -self.kd * gamma_l_star[6:9, :]
-        self.L[:, 3:6] = self.kd * gamma_a_star[6:9, :]
-        self.L[:, 26:29] = self.kd * gamma_q_star[6:9, :]
+        self.x = np.vstack((self.robot_states.omega, self.robot_states.q, self.robot_states.r_pos,
+                            self.robot_states.epsilon, -9.81, self.robot_states.qr))
 
     def define_constraints_matrices(self):
 
+        # --- PART 1: DEFINE STRUCTURE (Once) ---
         if self.first_int:
-            self.robot_states.contacts[0:3, :] = self.contacts
-            # Ac, bc = self.create_com_constraint()
-            # l = np.vstack((-np.inf, self.f_l))
-            # u = np.vstack((bc[0], self.f_u))
-
-            self.l = np.tile(self.f_l, (self.N, 1))
-            self.u = np.tile(self.f_u, (self.N, 1))
-
-            # self.C_cons[0, 18:20] = Ac[0, :]
+            l = self.qr_l
+            u = self.qr_u
+            self.l = np.tile(l, (self.N, 1))
+            self.u = np.tile(u, (self.N, 1))
 
             self.first_int = False
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
-        n_rl, t1_rl, t2_rl = self.cont_surfaces(self.contacts[1, :], self.contacts[2, :], self.contacts[0, :])
-        mu = 0.7 / np.sqrt(2)
-
-        # 5x3
-        Cf_rl = self.cf_matrix(n_rl, t1_rl, t2_rl, mu)
-
-        Cf = block_diag(Cf_rl)
-
-        Fc_max = -Cf @ self.Jinv[6:9, 6:9]
-
-        self.C_cons[0:, :] = Fc_max @ self.L
         Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
         aux_cons = self.C_cons @ self.Ba
 
         return aux_cons, Phi_cons
-
-    def center_of_mass_constraint(self):
-        l = (self.robot_states.r_pos[0:2, 0]).reshape(2, 1) - 0.1 * np.ones((2, 1))
-        u = (self.robot_states.r_pos[0:2, 0]).reshape(2, 1) + 0.1 * np.ones((2, 1))
-
-        return l, u
-
-    def cont_surfaces(self, c1, c2, c3):
-        v1 = c2 - c1
-        v2 = c3 - c1
-        n = np.cross(v1, v2)
-        if n[2] < 0:
-            n = -n
-        n = n / np.linalg.norm(n)
-        t1 = v1 / np.linalg.norm(v1)
-        t2 = np.cross(n, t1)
-
-        n = np.array([0, 0, 1])
-        t1 = np.array([1, 0, 0])
-        t2 = np.array([0, 1, 0])
-
-        return n, t1, t2
-
-    def cf_matrix(self, n, t1, t2, mu):
-        Cf = np.vstack([-mu * n + t1, -mu * n + t2, mu * n + t2, mu * n + t1, n])
-
-        return Cf
-
-    def create_com_constraint(self, margin=0.05):
-        """
-        Generates A, b for constraints based on the explicit order 
-        of self.contacts (0->1, 1->2, 2->0...).
-        """
-        contacts_2d = np.array([contact[:2] for contact in self.contacts])
-        n_vertices = len(contacts_2d)
-        centroid = np.mean(contacts_2d, axis=0)
-
-        A = []
-        b = []
-
-        for i in range(n_vertices):
-            v1 = contacts_2d[i]
-            v2 = contacts_2d[(i + 1) % n_vertices]
-
-            edge_vec = v2 - v1
-
-            normal = np.array([edge_vec[1], -edge_vec[0]])
-
-            normal_norm = np.linalg.norm(normal)
-            if normal_norm > 1e-10:
-                normal_unit = normal / normal_norm
-            else:
-                continue  # Skip zero-length edges
-
-            center_to_edge = v1 - centroid
-
-            if np.dot(normal_unit, center_to_edge) < 0:
-                normal_unit = -normal_unit
-
-            A.append(normal_unit)
-            b.append(np.dot(normal_unit, v1) - margin)
-
-        return np.array(A), np.array(b)

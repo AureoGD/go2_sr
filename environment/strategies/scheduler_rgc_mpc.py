@@ -7,14 +7,13 @@ from environment.strategies.base_self_righting import BaseSelfRighting
 from environment.strategies.rgc_mpc.hold_position import HoldPosition
 from environment.strategies.rgc_mpc.go_safe import GoSafe
 from environment.strategies.rgc_mpc.prepare_cw import PrepareCW
-# from environment.strategies.rgc_mpc.prepare_cw_tb import PrepareCW
-from environment.strategies.rgc_mpc.roll_cw_ii import RollCW
-# from environment.strategies.rgc_mpc.landing_cw_tb_backup import LandingCW
-from environment.strategies.rgc_mpc.landing_cw_rgc import LandingCW
-from environment.strategies.rgc_mpc.end_landing_cw import EndLandingCW
+from environment.strategies.rgc_mpc.roll_cw import RollCW
+# from environment.strategies.rgc_mpc.landing_cw import LandingCW
+from environment.strategies.rgc_mpc.landing_tb_cw import LandingCW
+from environment.strategies.rgc_mpc.prone_tb_cw import ProneCW
 from environment.strategies.rgc_mpc.stand_up import StandUpPhase
 
-CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, EndLandingCW, StandUpPhase]
+CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUpPhase]
 
 
 class SchedulerRGCMPC(BaseSelfRighting):
@@ -28,7 +27,6 @@ class SchedulerRGCMPC(BaseSelfRighting):
         3 -> RollCW
         4 -> LandingCW
         5 -> StandUp
-        6 -> RollCCW (optional / future)
     """
 
     def __init__(self, **kwargs):
@@ -117,6 +115,10 @@ class SchedulerRGCMPC(BaseSelfRighting):
             # StandUp or future controllers
             self.KP = self.kp * np.eye(12)
             self.KD = self.kd * np.eye(12)
+
+        # For future debug
+        # if mode == 6:
+        #     print(f"{self.robot_states.mpc_obj_val},")
 
         return self.delta_qr, self.KP, self.KD
 
