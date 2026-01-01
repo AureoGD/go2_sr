@@ -264,8 +264,45 @@ class Go2ModelSimMuJoCo():
                 signal.alarm(0)
 
         if self._is_render and self.viewer:
+            self.debug_viwer()
             self.viewer.sync()
             time.sleep(self.con_dt)
+
+    def debug_viwer(self):
+        self.viewer.user_scn.ngeom = 0
+        geom_id = self.viewer.user_scn.ngeom
+        self.viewer.user_scn.ngeom += 1
+        x, y, z = self.robot_states.pc_debug[0, :]
+        mujoco.mjv_initGeom(
+            self.viewer.user_scn.geoms[geom_id],
+            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+            size=[0.01, 0.01, 0.01],  # Radius
+            pos=[x, y, z],
+            mat=np.eye(3).flatten(),
+            rgba=[1, 0, 0, 1]  # Red
+        )
+        geom_id = self.viewer.user_scn.ngeom
+        self.viewer.user_scn.ngeom += 1
+        x, y, z = self.robot_states.pc_debug[1, :]
+        mujoco.mjv_initGeom(
+            self.viewer.user_scn.geoms[geom_id],
+            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+            size=[0.05, 0.05, 0.05],  # Radius
+            pos=[x, y, z],
+            mat=np.eye(3).flatten(),
+            rgba=[0, 0, 1, 1]  # Blue
+        )
+        geom_id = self.viewer.user_scn.ngeom
+        self.viewer.user_scn.ngeom += 1
+        x, y, z = self.robot_states.pc_debug[2, :]
+        mujoco.mjv_initGeom(
+            self.viewer.user_scn.geoms[geom_id],
+            type=mujoco.mjtGeom.mjGEOM_SPHERE,
+            size=[0.01, 0.01, 0.01],  # Radius
+            pos=[x, y, z],
+            mat=np.eye(3).flatten(),
+            rgba=[0, 1, 1, 1]  # Blue
+        )
 
     # ========================================================
     # TASK CONTROL (UNCHANGED)
@@ -315,7 +352,7 @@ class Go2ModelSimMuJoCo():
         # Let contacts settle (YOUR logic)
         render_aux = self._is_render
         self._is_render = False
-        for _ in range(100):
+        for _ in range(200):
             self._physics(tau=np.zeros(12))
         self._is_render = render_aux
 

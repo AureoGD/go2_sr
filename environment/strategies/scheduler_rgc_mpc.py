@@ -8,8 +8,8 @@ from environment.strategies.rgc_mpc.hold_position import HoldPosition
 from environment.strategies.rgc_mpc.go_safe import GoSafe
 from environment.strategies.rgc_mpc.prepare_cw import PrepareCW
 from environment.strategies.rgc_mpc.roll_cw import RollCW
-# from environment.strategies.rgc_mpc.landing_cw import LandingCW
-from environment.strategies.rgc_mpc.landing_tb_cw import LandingCW
+from environment.strategies.rgc_mpc.landing_cw import LandingCW
+# from environment.strategies.rgc_mpc.landing_tb_cw import LandingCW
 from environment.strategies.rgc_mpc.prone_tb_cw import ProneCW
 from environment.strategies.rgc_mpc.stand_up import StandUpPhase
 

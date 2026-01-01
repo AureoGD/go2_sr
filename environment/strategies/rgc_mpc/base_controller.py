@@ -134,6 +134,8 @@ class BaseRGC:
         self.check_dqr = False
         self.min_obj_val = 100
 
+        self.world_M_base = None
+
         self.convergence_threshold = 0.15
         self.ws = 20
 
@@ -374,6 +376,16 @@ class BaseRGC:
         self.first_int = True
         self.prob = None
 
+    def _plane_normal(self, points):
+        centroid = np.mean(points, axis=0)
+        centered_points = points - centroid
+        u, s, vh = np.linalg.svd(centered_points)
+        normal = vh[2, :]
+        if normal[2] < 0:
+            normal = -normal
+
+        return normal, centroid
+
     def cont_surfaces(self, c1, c2, c3):
         v1 = c2 - c1
         v2 = c3 - c1
@@ -413,3 +425,56 @@ class BaseRGC:
         Cf = np.vstack([-mu * n + t1, -mu * n + t2, mu * n + t2, mu * n + t1, n])
 
         return Cf
+
+    def world_to_body(self, p_world):
+        """
+        Convert a 3D world-frame position (numpy array)
+        to body-frame coordinates using Pinocchio.
+        Requires self.world_M_base already updated.
+        """
+        # Convert vector → SE3
+        p_se3 = pin.SE3.Identity()
+        p_se3.translation = np.array(p_world)
+
+        # Apply transform
+        p_body_se3 = self.world_M_base.actInv(p_se3)
+        return p_body_se3.translation
+
+    def feet_references(self, n, R=0.05):
+        """
+        Computes swing-feet reference points in BODY coordinates.
+        Uses:
+        self.contacts = array([[P1],[P2],[P3],[P4]]) in WORLD frame
+        self.world_M_base = pinocchio SE3 world→base transform
+        self.x[26:29] = RL foot current BODY-frame position (measured)
+
+        Returns:
+        Pr1_body, Pr2_body, Pr3_body
+        """
+
+        p1, p2, p3, p4 = self.contacts  # WORLD coords
+
+        n = n / np.linalg.norm(n)
+
+        d_rot = p4 - p2
+        d_rot = d_rot / np.linalg.norm(d_rot)
+
+        d_perp = np.cross(n, d_rot)
+        d_perp = d_perp / np.linalg.norm(d_perp)
+
+        if (np.dot(d_perp, p1 - p2) < 0) and (np.dot(d_perp, p3 - p2) < 0):
+            d_perp = -d_perp
+
+        foot_world = self.x[26:29].flatten()  # convert body state → world pos
+        foot_z = foot_world[2]
+
+        Pr1_world = p2 + R * d_perp  # front target
+        Pr2_world = p4 + d_rot * R / 1.5  # point ON rotation axis
+        Pr2_world[2] = foot_z * 1.8
+        Pr3_world = p4 + R * d_perp  # rear target
+
+        self.robot_states.pc_debug[0, :] = Pr1_world
+        self.robot_states.pc_debug[1, :] = Pr2_world
+        self.robot_states.pc_debug[2, :] = Pr3_world
+
+        return Pr1_world, Pr2_world, Pr3_world

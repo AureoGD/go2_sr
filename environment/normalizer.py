@@ -150,7 +150,8 @@ class Go2StateNormalizer:
         'QR': slice(37, 49),
         'TAU': slice(49, 61),
         'MODE': 61,
-        'MPC_FAIL': 62
+        'MPC_FAIL': 62,
+        'CURRENT_STATE': 63,
     }
 
     def __init__(self, box_size=0.5):
@@ -177,7 +178,8 @@ class Go2StateNormalizer:
         ])
 
         self.torque_limits = np.array([23.7, 23.7, 45.43] * 4)
-        self.num_modes = 5
+        self.num_modes = 7
+        self.num_states = 6  # safe, end_prep, end_roll, end_landing, end_prone, end_stand_up
 
     def reset_shadow(self):
         """Resets the shadow normalizer."""
@@ -205,6 +207,7 @@ class Go2StateNormalizer:
         normalized[self.IDX['TAU']] = state[self.IDX['TAU']] / self.torque_limits
         normalized[self.IDX['MODE']] = state[self.IDX['MODE']] / self.num_modes
         normalized[self.IDX['MPC_FAIL']] = state[self.IDX['MPC_FAIL']]
+        normalized[self.IDX['CURRENT_STATE']] = state[self.IDX['CURRENT_STATE']] / self.num_states
 
         return normalized
 

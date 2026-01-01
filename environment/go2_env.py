@@ -4,6 +4,7 @@ import psutil
 import os
 from environment.go2_sim import Go2ModelSimMuJoCo
 from environment.normalizer import Go2StateNormalizer
+from collections import deque
 
 
 class Go2Env(gym.Env):
@@ -24,7 +25,7 @@ class Go2Env(gym.Env):
         strategy_name = kwargs.get("strategy", "rgc")
         self.robot_sim = Go2ModelSimMuJoCo(render=self.rendering, strategy_name=strategy_name, **kwargs)
 
-        self.n_states = 63
+        self.n_states = 64
         self.action_space = gym.spaces.Discrete(n=int(self.robot_sim.task_control.modes))
         self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(self.n_states,), dtype=np.float32)
 
@@ -52,12 +53,19 @@ class Go2Env(gym.Env):
 
         self.PROGRESS_MODES = {3, 5, 6}
         self.JOINT_PROGRESS_MODES = {1, 2, 4}
-        self.JOINT_PROGRESS_EPS = 0.01
+        self.EPS_Q = 1e-3
+        self.EPS_Z = 1e-3
+        self.EPS_TH = 5e-4
 
         self.min_upright_height = 0.2
 
         self.stagnation_counter = 0
         self.joint_stagnation_counter = 0
+
+        self.WINDOW = 20
+        self.hq = deque(maxlen=self.WINDOW)  # history of the joint pos
+        self.hz = deque(maxlen=self.WINDOW)  # history of the height
+        self.hth = deque(maxlen=self.WINDOW)  # history of the orietation
 
     def set_difficulty(self, value: float):
         self.scale_factor = float(value)
@@ -128,15 +136,16 @@ class Go2Env(gym.Env):
         rs.subtask_succes = False
         rs.mpc_fail = False
         rs.sr_mode_completed[:] = [False] * len(rs.sr_mode_completed)
+        rs.current_sucess_mode = 0.0
 
         start_pos = rs.r_pos
         self.normalizer._norm_pos(start_pos.reshape(3))
         self.normalizer.reset_reference()
         self._norm()
 
-        self.start_roll = abs(rs.rpy[0])
-        self.start_height = rs.r_pos[2]
-        self.start_q = rs.q.copy()
+        self.hq.clear()
+        self.hth.clear()
+        self.hz.clear()
 
         self.stagnation_counter = 0
         self.joint_stagnation_counter = 0
@@ -156,6 +165,7 @@ class Go2Env(gym.Env):
         self.st[49:61] = (rs.tau_pd + rs.tau_g).reshape(12)
         self.st[61] = float(self.current_mode)
         self.st[62] = float(rs.mpc_fail)
+        self.st[63] = float(rs.current_sucess_mode)
         self.st = self.normalizer.normalize(self.st)
 
     def _reward(self):
@@ -171,28 +181,24 @@ class Go2Env(gym.Env):
         if abs_roll < np.pi * 30 / 180:
             r += self.ori_weight
 
-        if abs_roll > np.pi / 2 and self.current_mode == 6:
+        if abs_roll > np.pi / 2 and self.current_mode in [5, 6, 4]:
             r -= 1.0
 
         if self.current_mode == 0:
-            r -= 0.01
+            r -= 0.1
 
         if self.current_mode != self.last_mode:
-            self.joint_stagnation_counter = 0
-            self.stagnation_counter = 0
-            if self.current_mode in self.PROGRESS_MODES:
-                self.start_roll = abs(rs.rpy[0])
-                self.start_height = z
-
-            self.start_q = rs.q.copy()
-
             if self.current_mode_tick < self.MIN_DWELL_TICKS:
-                r -= 2.0
+                r -= 5.0
             else:
                 r -= 0.05
-
+            self.joint_stagnation_counter = 0
+            self.stagnation_counter = 0
             self.current_mode_tick = 0
             self.total_mode_changes += 1
+            self.hq.clear()
+            self.hth.clear()
+            self.hz.clear()
 
         if rs.subtask_succes and not rs.sr_mode_completed[self.current_mode]:
             rs.sr_mode_completed[:] = [False] * len(rs.sr_mode_completed)
@@ -209,29 +215,41 @@ class Go2Env(gym.Env):
             if self.current_mode == 6:
                 self.standup_end_flag = True
 
-        joint_progress = np.linalg.norm(rs.q - self.start_q)
+        idx = np.where(rs.sr_mode_completed)[0]
+        rs.current_sucess_mode = float(idx[0]) if idx.size > 0 else 0
 
-        if self.current_mode in self.PROGRESS_MODES:
-            roll_progress = self.start_roll - abs_roll
-            r += 0.5 * roll_progress
+        self.hq.append(rs.q.copy().ravel())
+        self.hz.append(float(rs.r_pos[2]))
+        self.hth.append(float(abs_roll))
 
-            if roll_progress < 0.01:
-                self.stagnation_counter += 1
+        if len(self.hq) >= self.WINDOW:
+            dq_diff = np.diff(np.array(self.hq), axis=0)
+            dq = np.abs(dq_diff).mean() if dq_diff.size > 0 else 0.0
+
+            hz_diff = np.diff(np.array(self.hz))
+            dz = abs(hz_diff[-1]) if hz_diff.size > 0 else 0.0
+
+            hth_diff = np.diff(np.array(self.hth))
+            dth = abs(hth_diff[-1]) if hth_diff.size > 0 else 0.0
+
+            if self.current_mode in self.PROGRESS_MODES:
+                if dth < self.EPS_TH and dz < self.EPS_Z:
+                    self.stagnation_counter += 1
+                else:
+                    self.stagnation_counter = 0
             else:
                 self.stagnation_counter = 0
-        else:
-            self.stagnation_counter = 0
 
-        if self.current_mode in self.JOINT_PROGRESS_MODES:
-            if joint_progress < self.JOINT_PROGRESS_EPS:
-                self.joint_stagnation_counter += 1
+            if self.current_mode in self.JOINT_PROGRESS_MODES:
+                if dq < self.EPS_Q:
+                    self.joint_stagnation_counter += 1
+                else:
+                    self.joint_stagnation_counter = 0
             else:
                 self.joint_stagnation_counter = 0
-        else:
-            self.joint_stagnation_counter = 0
 
         if self.joint_stagnation_counter > 50:
-            r -= 0.01
+            r -= 0.002 * self.joint_stagnation_counter
 
         if rs.mpc_fail:
             r -= 1.0

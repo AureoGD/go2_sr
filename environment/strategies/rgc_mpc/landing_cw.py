@@ -24,10 +24,9 @@ class LandingCW(BaseRGC):
 
         self._update_detector()
 
-        self.nx = 23
+        self.nx = 29
         self.nu = 12
-        # self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
-        self.ny = 12
+        self.ny = 19
         self.nc = 12  # max joint pos, GRF z component
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -43,30 +42,45 @@ class LandingCW(BaseRGC):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:, 3:15] = np.eye(12)
-        # self.Ca[12, 16] = 1
+        self.Ca[:3, 3:6] = np.eye(3)  # FR joints
+        self.Ca[3:6, 9:12] = np.eye(3)  # RR joints
+        self.Ca[6:10, 18:22] = np.eye(4)  # Quaternions
+        self.Ca[10:13, 23:26] = np.eye(3)  # FL foot (P1)
+        self.Ca[13:16, 26:29] = np.eye(3)  # RL foot (P2)
+        self.Ca[16:, 26:29] = np.eye(3)  # RL foot (P3)
 
-        self.C_cons[0:12, 23:] = np.identity(12)
+        self.C_cons[0:12, self.nx:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qfl = np.diag(np.array([1, 1, 1]))
-        Qrl = np.diag(np.array([1, 1, 1]))
+        Qr = np.diag(np.array([1, 1, 1]))  # FR and RR joints
+        Qeps = np.diag(np.array([1, 1, 1, 1]))  # Quaternions
+        Qposfl = np.diag(np.array([5, 3, 5]))  # FL foot (P1)
+        Qposrl1 = np.diag(np.array([8, 8, 4]))  # RL foot (P2)
+        Qposrl2 = np.diag(np.array([8, 8, 4]))  # RL foot (P3)
 
-        Q = block_diag(Qrl, Qfl, Qrl, Qfl)
+        Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl1, Qposrl2)
         self.Q = block_diag(*[Q] * self.N)
+
+        # use latter to update self.Q
+        self.single_output_dim = 19  # = 19
+        self.idx_RL1 = slice(13, 16)  # = 13:16
+        self.idx_RL2 = slice(16, 19)  # = 16:19
 
         # Update control action weight matrix
         Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrfl = 75 * np.diag(np.array([1, 1, 1]))
+        Rdqrfl = 0.9 * np.diag(np.array([0.9, 1, 1]))
         Rdqrr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrl = 75 * np.diag(np.array([2, 1, 1]))
+        Rdqrl = 0.9 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
-        qr = np.array([0.4, 1.5, -2.0, -0.8, 1.0, -2.6, 0.4, 1.5, -2.0, -0.8, 1.0, -1.0]).reshape(12, 1)
 
-        self.ref = np.tile(qr, (self.N, 1))
+        qr = np.array([0.4, 1.5, -2.0, 0.4, 1.5, -2.0]).reshape(6, 1)
+        epsr = np.array([0, 0, 0, 1]).reshape(4, 1)
+        pos_foot = np.array([0, 0, 0]).reshape(3, 1)
+        ref = np.vstack((qr, epsr, pos_foot, pos_foot, pos_foot))
+        self.ref = np.tile(ref, (self.N, 1))
 
         qr_l = np.array([
             -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
@@ -144,6 +158,7 @@ class LandingCW(BaseRGC):
 
         Jc[3:6:, 3:6] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('FL_foot'),
                                                  pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6:9]
+        foot_fl = self.data.oMf[self.model.getFrameId('FL_foot')].translation
 
         Jc[6:9, 6:9] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('RR_foot'),
                                                 pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 15:18]
@@ -154,11 +169,16 @@ class LandingCW(BaseRGC):
                                                   pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 12:15]
         foot_rl = self.data.oMf[self.model.getFrameId('RL_foot')].translation
 
+        self.contacts[0, :] = foot_fr
+        self.contacts[1, :] = self.data.oMf[self.model.getFrameId('FR_thigh_joint')].translation
+        self.contacts[2, :] = foot_rr
+        self.contacts[3, :] = self.data.oMf[self.model.getFrameId('RR_thigh_joint')].translation
+
         cross_fl = np.zeros((3, 3))
         cross_rl = np.zeros((3, 3))
         Sa = np.vstack((cross_fr, cross_fl, cross_rr, cross_rl))
 
-        gamma = Jc
+        gamma = Jc.copy()
         gamma[3:6, :] = np.hstack((np.zeros((3, 3)), (np.eye(3)), np.zeros((3, 6))))
         gamma[9:12, :] = np.hstack((np.zeros((3, 9)), (np.eye(3))))
 
@@ -194,30 +214,51 @@ class LandingCW(BaseRGC):
 
         self.B[0:3, :] = k3
 
-        self.Aa[0:23, 0:23] = np.identity(self.nx) + self.ts * self.A
-        self.Aa[0:23, 23:] = self.ts * self.B
+        self.Aa[0:self.nx, 0:self.nx] = np.identity(self.nx) + self.ts * self.A
+        self.Aa[0:self.nx, self.nx:] = self.ts * self.B
 
-        self.Ba[0:23, :] = self.ts * self.B
+        self.Ba[0:self.nx, :] = self.ts * self.B
 
-        self.Ba[6:9, 3:6] = np.eye(3)
-        self.Ba[12:15, 9:12] = np.eye(3)
+        self.Ba[6:9, 3:6] = self.ts * np.eye(3)
+        self.Ba[12:15, 9:12] = self.ts * np.eye(3)
 
         self.Ba[15:18, 3:6] = J_com[:, 3:6]
         self.Ba[15:18, 9:12] = J_com[:, 9:]
+        self.Ba[23:26,
+                3:6] = self.ts * pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('FL_foot'),
+                                                          pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6:9]
+        self.Ba[26:29,
+                9:12] = self.ts * pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('RL_foot'),
+                                                           pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 12:15]
 
-        self.x = np.vstack((self.robot_states.omega, self.robot_states.q, self.robot_states.r_pos,
-                            self.robot_states.epsilon, -9.81, self.robot_states.qr))
+        self.world_M_base = self.data.oMf[self.model.getFrameId('base_link')].copy()
+
+        self.x = np.vstack(
+            (self.robot_states.omega, self.robot_states.q, self.robot_states.r_pos, self.robot_states.epsilon, -9.81,
+             foot_fl.reshape(3, 1), foot_rl.reshape(3, 1), self.robot_states.qr))
 
     def define_constraints_matrices(self):
 
-        # --- PART 1: DEFINE STRUCTURE (Once) ---
         if self.first_int:
+            n, _ = self._plane_normal(self.contacts)
+            current_yaw = self.robot_states.r_pos[2, 0]
+            quat_ref, R_ref = self.eps_reference(current_yaw=current_yaw, plane_normal=n)
+            self.ref.reshape(self.N, self.ny)[:, 6:10] = quat_ref
+
+            fl_ref, rl_ref1, rl_ref2 = self.feet_references(n=n, R=0.27)
+
+            self.ref.reshape(self.N, self.ny)[:, 10:13] = fl_ref
+            self.ref.reshape(self.N, self.ny)[:, 13:16] = rl_ref1
+            self.ref.reshape(self.N, self.ny)[:, 16:19] = rl_ref2
+
             l = self.qr_l
             u = self.qr_u
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
 
             self.first_int = False
+
+        self.update_Q_weights()
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
@@ -226,3 +267,74 @@ class LandingCW(BaseRGC):
         aux_cons = self.C_cons @ self.Ba
 
         return aux_cons, Phi_cons
+
+    def update_Q_weights(self):
+        # current RL foot state (body)
+        # x_rl = self.x[26:29].flatten()
+        # P2 = self.ref[13:16].flatten()
+        sigma = self.compute_sigma()
+
+        # base weights
+        Q2 = np.diag([1, 1, 1])  # RL → P2
+        Q3 = np.diag([1, 1, 1])  # RL → P3
+
+        # blend
+        Qrl1 = (1 - sigma) * Q2  # early phase
+        Qrl2 = sigma * Q3  # late phase
+
+        # write into Q matrix
+        for k in range(self.N):
+            base = k * self.single_output_dim  # offset per stage
+
+            idx_RL1 = slice(base + 13, base + 16)
+            idx_RL2 = slice(base + 16, base + 19)
+
+            # assign diagonal only
+            self.Q[idx_RL1, idx_RL1] = Qrl1
+            self.Q[idx_RL2, idx_RL2] = Qrl2
+
+    # def compute_sigma(self):
+    #     P2 = self.ref[13:16]
+    #     d = (self.ref[16:19] - P2)
+    #     R = np.linalg.norm(d)
+    #     if R < 1e-6:
+    #         return 1.0
+    #     d = d / R
+    #     foot = self.x[26:29]
+    #     s = float(d.T @ (foot - P2))
+    #     sigma = s / R
+    #     return float(np.clip(sigma, 0.0, 1.0))
+
+    def compute_sigma(self, eps=0.4):  # eps = 4 cm
+        # Extract references
+        P2 = self.ref[13:16].flatten()  # RL target #1
+        P3 = self.ref[16:19].flatten()  # RL target #2
+        x_rl = self.x[26:29].flatten()  # RL foot state
+
+        d = np.linalg.norm(x_rl[:2] - P2[:2])
+        if d < 0.15:
+            return 1
+        else:
+            return 0
+        # sigma = 1 - np.clip(d / 0.25, 0, 1)
+
+        return sigma
+
+        # # XY-only vectors
+        # d_xy = P3[:2] - P2[:2]
+        # R = np.linalg.norm(d_xy)
+        # if R < 1e-6:
+        #     return 1.0
+
+        # d_xy = d_xy / R
+        # s = float(d_xy @ (x_rl[:2] - P2[:2]))  # projection using only X,Y
+
+        # # gating logic
+        # if s <= eps:
+        #     return 0.0
+        # if s >= R:
+        #     return 1.0
+
+        # # smoothstep interpolation
+        # t = (s - eps) / (R - eps)
+        # return 3 * t * t - 2 * t * t * t

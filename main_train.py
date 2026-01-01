@@ -41,7 +41,7 @@ def main():
         "job_name": "go2_self_righting",
         "pop_size": 40,
         "num_scenarios": 5,
-        "max_generations": 150,
+        "max_generations": 250,
         "max_workers": 20,
         "sigma_init": 0.05,
         "sigma_decay": 0.995,
@@ -87,7 +87,7 @@ def main():
     STARTUP_GRACE_SEC = 30.0
 
     global_stats = None
-    gen = 0
+    gen = 1
 
     print(f"[Main] Pool started with {num_workers} workers")
 
@@ -95,7 +95,7 @@ def main():
     # TRAIN LOOP
     # --------------------------------------------------------
     try:
-        while gen < config["max_generations"]:
+        while gen < config["max_generations"] + 1:
             gen_start = time.time()
 
             candidates = optimizer.ask()

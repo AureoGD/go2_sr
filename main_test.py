@@ -10,9 +10,9 @@ from es_framework.components.policy import Policy
 
 USE_TRAINED_POLICY = False
 
-RESULTS_DIR = "results/go2_self_righting_CEM_20251225_091824"
+RESULTS_DIR = "results/go2_self_righting_CEM_20251231_182456"
 MODEL_DIR = os.path.join(RESULTS_DIR, "models")
-MODEL_FILE = "gen_0140.pth"
+MODEL_FILE = "best_overall.pth"
 CONFIG_FILE = os.path.join(RESULTS_DIR, "config.json")
 
 DIFFICULTY = 1.0
@@ -87,7 +87,7 @@ def main():
         for ep in range(5):
             print(f"\n--- Episode {ep + 1} ---")
             # r0 = [np.pi, 0, -np.pi / 2]
-            r0 = [np.pi, 0, 0.25]
+            r0 = [np.pi, 0, 0]
             b0 = [0, 0, 0.2]
             # q0 = [0.2, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
             obs, info = env.reset(b0=b0, r0=r0)
@@ -106,17 +106,17 @@ def main():
                     if tick < 20:
                         action = 0
                     elif tick < 170:
-                        action = 1
+                        action = 1  # go_safe
                     elif tick < 400:
-                        action = 2
+                        action = 2  # prepare_cw
                     elif tick < 650:
-                        action = 3
-                    elif tick < 900:
-                        action = 4
-                    elif tick < 1150:
-                        action = 5
-                    elif tick < 1400:
-                        action = 6
+                        action = 3  # roll_cw
+                    elif tick < 1200:
+                        action = 4  # landing_cw
+                    # elif tick < 1150:
+                    #     action = 5  # prone
+                    # elif tick < 1400:
+                    #     action = 6  # standing_up
                     else:
                         action = 0
 

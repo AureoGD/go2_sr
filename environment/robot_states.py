@@ -23,9 +23,12 @@ class RobotStates:
     tau_g: np.ndarray = field(default_factory=lambda: np.zeros((12, 1), dtype=np.float64))
     contacts: np.ndarray = field(default_factory=lambda: np.zeros((4, 3), dtype=np.float64))
 
+    pc_debug: np.ndarray = field(default_factory=lambda: np.zeros((3, 3), dtype=np.float64))
+
     mpc_fail: bool = field(default=False)
     critical_mpc_fail: bool = field(default=False)
     subtask_succes: bool = field(default=False)
     mpc_obj_val: float = field(default=0)
+    current_sucess_mode: float = field(default=0)
 
     sr_mode_completed: List[bool] = field(default_factory=lambda: [False] * 7)

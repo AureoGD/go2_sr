@@ -129,8 +129,7 @@ class LearningPhases:
         r0[1] += config.terrain_angle_rad[1]  # Pitch
 
         random_yaw = np.random.uniform(self.r0_yaw_range[0], self.r0_yaw_range[1])
-        # overite until solve MPC bug
-        r0[2] = 0
+        r0[2] = random_yaw
 
         return r0.tolist()
 

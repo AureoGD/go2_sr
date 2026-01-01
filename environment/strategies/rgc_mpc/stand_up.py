@@ -226,11 +226,6 @@ class StandUpPhase(BaseRGC):
         Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
         aux_cons = self.C_cons @ self.Ba
 
-        # aux_cons[0:2, :] = self.C_cons[0:2, :] @ self.Ba
-        # aux_cons[2:, :] = self.kp * Fc_mtx
-        # self.C_cons[2:, :] = Fc_mtx @ self.L
-        # Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
-
         if self.first_int:
             yaw = self.robot_states.rpy[2, 0]
 
