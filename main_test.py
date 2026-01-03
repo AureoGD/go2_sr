@@ -8,11 +8,14 @@ from environment.go2_env import Go2Env
 from environment.normalizer import NormalizerStats
 from es_framework.components.policy import Policy
 
-USE_TRAINED_POLICY = False
+from environment.phase_library import PhaseLibrary
+from environment.phase_spawner import PhaseSpawner
 
-RESULTS_DIR = "results/go2_self_righting_CEM_20251231_182456"
+USE_TRAINED_POLICY = True
+
+RESULTS_DIR = "results/go2_self_righting_CEM_20260102_122408"
 MODEL_DIR = os.path.join(RESULTS_DIR, "models")
-MODEL_FILE = "best_overall.pth"
+MODEL_FILE = "gen_0250.pth"
 CONFIG_FILE = os.path.join(RESULTS_DIR, "config.json")
 
 DIFFICULTY = 1.0
@@ -83,14 +86,22 @@ def main():
 
         print("\n=== Starting Evaluation Loop (Ctrl+C to stop) ===")
 
+    phase_lib = PhaseLibrary()
+    phase_spawner = PhaseSpawner(phase_lib)
+
+    scenarios = [phase_spawner.apply() for _ in range(20)]
+
     try:
-        for ep in range(5):
+        ep = 0
+        for s in scenarios:
             print(f"\n--- Episode {ep + 1} ---")
-            # r0 = [np.pi, 0, -np.pi / 2]
-            r0 = [np.pi, 0, 0]
+            r0 = [0, 0, 0]
+            # r0 = [0, 0, 0]
             b0 = [0, 0, 0.2]
-            # q0 = [0.2, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
-            obs, info = env.reset(b0=b0, r0=r0)
+            q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
+            # q0, r0, b0, mode = s
+            obs, info = env.reset(b0=b0, r0=r0, q0=q0)
+            # print(f"\n--- Mode {mode} ---")
             total_reward = 0.0
             tick = 0
 
@@ -103,22 +114,25 @@ def main():
                         action, _ = policy.predict(obs, deterministic=True)
                         action = int(action)
                 else:
+                    # action = 0
                     if tick < 20:
                         action = 0
-                    elif tick < 170:
+                    elif tick < 150:
                         action = 1  # go_safe
-                    elif tick < 400:
+                    elif tick < 150 + 185:
                         action = 2  # prepare_cw
-                    elif tick < 650:
+                    elif tick < 150 + 185 + 150:
                         action = 3  # roll_cw
-                    elif tick < 1200:
+                    elif tick < 150 + 185 + 150 + 250:
                         action = 4  # landing_cw
-                    # elif tick < 1150:
-                    #     action = 5  # prone
-                    # elif tick < 1400:
-                    #     action = 6  # standing_up
+                    elif tick < 150 + 185 + 150 + 250 + 270:
+                        action = 5  # prone
+                    elif tick < 150 + 185 + 150 + 250 + 270 + 300:
+                        action = 6  # standing_up
                     else:
                         action = 0
+
+                print(action)
 
                 obs, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward

@@ -8,6 +8,7 @@ import osqp
 from scipy import sparse
 
 from environment.strategies.rgc_mpc.chebyshev_center import ChebyshevCenterSolver
+from environment.strategies.rgc_mpc.poligon_constraint import SupportPolygonConstraint
 
 
 @contextmanager
@@ -136,6 +137,9 @@ class BaseRGC:
 
         self.world_M_base = None
 
+        self.sigma = 0
+
+        self.ticks = 0
         self.convergence_threshold = 0.15
         self.ws = 20
 
@@ -221,8 +225,10 @@ class BaseRGC:
         is_complete = self.task_finish_detect.is_task_complete(abs(res.info.obj_val))
         # if is_complete:
         #     pass
-        if self.check_dqr is True and abs(sum(self.dqr)) < 0.003:
-            is_complete = True
+        if self.check_dqr:
+            if self.ticks == 180:
+                is_complete = True
+            self.ticks += 1
         self.robot_states.subtask_succes = is_complete
 
         self.robot_states.mpc_obj_val = res.info.obj_val
@@ -375,6 +381,8 @@ class BaseRGC:
             self.task_finish_detect.reset()
         self.first_int = True
         self.prob = None
+        self.ticks = 0
+        self.sigma = 0
 
     def _plane_normal(self, points):
         centroid = np.mean(points, axis=0)

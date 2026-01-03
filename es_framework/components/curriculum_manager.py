@@ -34,7 +34,6 @@ class CurriculumManager:
         Returns a float representing the current difficulty level.
         Used by the worker to set the physics or reward scaling.
         """
-        # In your case, difficulty maps directly to the current stage index (0.0 to 4.0)
         return float(self.current_stage_idx)
 
     def get_reset_conditions(self, n_scenarios: int = 10) -> List[Tuple]:
@@ -57,7 +56,6 @@ class CurriculumManager:
         print(f"   >>> [Curriculum] Stage: {self.current_stage_idx} | "
               f"Success Rate: {success_rate:.2f} | Avg: {avg_success:.2f}")
 
-        # LOGIC: Advance Stage
         if avg_success >= self.consistency_threshold:
             if self.current_stage_idx < self.target_task_idx:
                 self.current_stage_idx += 1
@@ -72,7 +70,6 @@ class CurriculumManager:
 
                 return True  # Stage changed
 
-        # LOGIC: Regression (Optional - go back if failing hard)
         elif avg_success < 0.1 and self.current_stage_idx > 0:
             # self.current_stage_idx -= 1
             # self.score_history.clear()

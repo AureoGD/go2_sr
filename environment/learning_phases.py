@@ -41,28 +41,28 @@ class LearningPhases:
                 terrain_angle_rad=np.array([0.0, 0.0, 0.0]),
             ),
 
-            # STAGE 1: Flat HeightField
-            ScenarioConfig(name="Flat_HF",
-                           difficulty_id=1,
-                           terrain_origin=np.array([0.0, 3.0, 0.0]),
-                           terrain_angle_rad=np.array([0.0, 0.0, 0.0]),
-                           z_noise_range=(0.5, 0.8)),
+            # # STAGE 1: Flat HeightField
+            # ScenarioConfig(name="Flat_HF",
+            #                difficulty_id=1,
+            #                terrain_origin=np.array([0.0, 3.0, 0.0]),
+            #                terrain_angle_rad=np.array([0.0, 0.0, 0.0]),
+            #                z_noise_range=(0.5, 0.8)),
 
-            # STAGE 2: Slope 5°
-            # Note: Origin Z is pre-calculated to be "on the slope" at X=3.25
-            ScenarioConfig(
-                name="Slope_5",
-                difficulty_id=2,
-                terrain_origin=np.array([3.25, 0.0, 0.0]),  # Z will be handled by logic or pre-calc if needed
-                terrain_angle_rad=np.array([0.0, np.deg2rad(5), 0.0]),
-            ),
+            # # STAGE 2: Slope 5°
+            # # Note: Origin Z is pre-calculated to be "on the slope" at X=3.25
+            # ScenarioConfig(
+            #     name="Slope_5",
+            #     difficulty_id=2,
+            #     terrain_origin=np.array([3.25, 0.0, 0.0]),  # Z will be handled by logic or pre-calc if needed
+            #     terrain_angle_rad=np.array([0.0, np.deg2rad(5), 0.0]),
+            # ),
 
-            # STAGE 3: HeightField Slope 5°
-            ScenarioConfig(name="Slope_5_HF",
-                           difficulty_id=3,
-                           terrain_origin=np.array([3.25, 3.0, 0.0]),
-                           terrain_angle_rad=np.array([0.0, np.deg2rad(5), 0.0]),
-                           z_noise_range=(0.5, 0.8))
+            # # STAGE 3: HeightField Slope 5°
+            # ScenarioConfig(name="Slope_5_HF",
+            #                difficulty_id=3,
+            #                terrain_origin=np.array([3.25, 3.0, 0.0]),
+            #                terrain_angle_rad=np.array([0.0, np.deg2rad(5), 0.0]),
+            #                z_noise_range=(0.5, 0.8))
         ]
 
         self.q0_base = np.array([-0.2, 2, -1.65, -0.6, 1.86, -1.65, -0.5, 1.06, -1.0, 0.25, 1.36, -1.05])
@@ -75,12 +75,14 @@ class LearningPhases:
                                    [-0.25, 0.25], [-0.5, 0.5], [-0.75, 0.75], [-0.25, 0.25], [-0.5, 0.5], [-0.75,
                                                                                                            0.75]])
 
-    def get_initial_conditions(
-        self,
-        num_conditions: int,
-        max_difficulty_id: int,  # <--- CHANGED: Logic now uses this as the "Ceiling"
-        seed: Optional[int] = None
-    ) -> List[Tuple[List[float], List[float], List[float]]]:
+        self.q0_upside = np.array([0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7])
+        self.b0_upside = np.array([0, 0, 0.2])
+        self.r0_upside = np.array([0, 0, 0])
+
+    def get_initial_conditions(self,
+                               num_conditions: int,
+                               max_difficulty_id: int,
+                               seed: Optional[int] = None) -> List[Tuple[List[float], List[float], List[float]]]:
 
         if seed is not None:
             np.random.seed(seed)
@@ -99,12 +101,20 @@ class LearningPhases:
         conditions = []
 
         for _ in range(num_conditions):
-            selected_idx = np.random.choice(active_indices, p=probs)
-            config = self.scenarios[selected_idx]
+            val = np.random.random()
+            if val < 0.6:
+                selected_idx = np.random.choice(active_indices, p=probs)
+                config = self.scenarios[selected_idx]
 
-            q0 = self._generate_q0()
-            r0 = self._generate_r0(config)
-            b0 = self._generate_b0(config)
+                q0 = self._generate_q0()
+                r0 = self._generate_r0(config)
+                b0 = self._generate_b0(config)
+            else:
+                q0 = self.q0_base.tolist()
+                b0 = self.b0_upside.tolist()
+                r0 = self.r0_upside
+                r0[2] = np.random.uniform(self.r0_yaw_range[0], self.r0_yaw_range[1])
+                r0 = r0.tolist()
 
             conditions.append((q0, r0, b0))
 

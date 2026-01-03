@@ -20,7 +20,8 @@ class PrepareCW(BaseRGC):
         self.M = 15
         self.ts = 0.01
         self.convergence_threshold = 0.1
-        self.ws = 30
+        self.ws = 40
+        self.check_dqr = True
         self._update_detector()
 
         self.nx = 27
@@ -66,7 +67,7 @@ class PrepareCW(BaseRGC):
         Qq = 0.1 * np.eye(11)
         Qq[0, 0] = 1
         Qq[6, 6] = 1
-        Qpc = block_diag(0.001, 0.001, 4)
+        Qpc = block_diag(0.1, 0.1, 16)
 
         Q = block_diag(Qq, Qpc)
 

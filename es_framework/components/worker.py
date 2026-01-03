@@ -94,8 +94,8 @@ def run_micro_task(task_args: Tuple):
             sim_instance.normalizer.reset_shadow()
 
         # Reset environment
-        q0, r0, b0 = single_condition
-        obs, _ = sim_instance.reset(q0=q0, r0=r0, b0=b0)
+        q0, r0, b0, mode = single_condition
+        obs, _ = sim_instance.reset(q0=q0, r0=r0, b0=b0, mode=mode)
 
         episode_reward = 0.0
         max_steps = getattr(sim_instance, "max_step_limit", 1000)

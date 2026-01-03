@@ -229,7 +229,7 @@ class StandUpPhase(BaseRGC):
         if self.first_int:
             yaw = self.robot_states.rpy[2, 0]
 
-            center, radius = self.center_optimizer.solve(self.contacts)
+            # center, radius = self.center_optimizer.solve(self.contacts)
 
             epsRef, _ = self.eps_reference(
                 current_yaw=yaw,

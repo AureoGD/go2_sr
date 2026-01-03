@@ -14,6 +14,8 @@ from tqdm import tqdm
 
 from es_framework.optimizers import get_optimizer
 from environment.learning_phases import LearningPhases
+from environment.phase_library import PhaseLibrary
+from environment.phase_spawner import PhaseSpawner
 from es_framework.components.curriculum_manager import CurriculumManager
 from es_framework.components.worker import init_worker, run_micro_task
 from es_framework.components.policy import Policy
@@ -66,8 +68,10 @@ def main():
     params = list(policy.parameters())
     assert len(params) > 0, "Policy has no parameters!"
 
-    phases = LearningPhases()
-    curriculum = CurriculumManager(phases=phases)
+    phase_lib = PhaseLibrary()
+    phase_spawner = PhaseSpawner(phase_lib)
+
+    # curriculum = CurriculumManager(phases=phases)
     optimizer = get_optimizer(config["optimizer_type"], config, policy)
 
     logger = TrainingLogger(config=config, root_dir="results")
@@ -99,9 +103,10 @@ def main():
             gen_start = time.time()
 
             candidates = optimizer.ask()
-            scenarios = curriculum.get_reset_conditions(config["num_scenarios"])
-            difficulty = curriculum.get_difficulty()
-
+            # scenarios = curriculum.get_reset_conditions(config["num_scenarios"])
+            # scenarios = [phase_spawner.inject(s) for s in curriculum.get_reset_conditions(config["num_scenarios"])]
+            # difficulty = curriculum.get_difficulty()
+            scenarios = [phase_spawner.apply() for _ in range(config["num_scenarios"])]
             # --------------------------------------------
             # BUILD TASKS
             # --------------------------------------------
@@ -109,7 +114,7 @@ def main():
             task_id = 0
             for i in range(config["pop_size"]):
                 for s in scenarios:
-                    tasks.append((task_id, candidates[i], s, difficulty, global_stats))
+                    tasks.append((task_id, candidates[i], s, 0, global_stats))
                     task_id += 1
 
             # --------------------------------------------
@@ -175,7 +180,7 @@ def main():
             if worker_stats:
                 global_stats = worker_stats[0]
 
-            curriculum.update(success_rate=float(np.mean(rewards_np > 0.0)), optimizer=optimizer)
+            # curriculum.update(success_rate=float(np.mean(rewards_np > 0.0)), optimizer=optimizer)
 
             gen_time = time.time() - gen_start
             print(f"Gen {gen:03d} | "

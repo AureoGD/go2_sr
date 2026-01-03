@@ -8,8 +8,8 @@ from environment.strategies.rgc_mpc.hold_position import HoldPosition
 from environment.strategies.rgc_mpc.go_safe import GoSafe
 from environment.strategies.rgc_mpc.prepare_cw import PrepareCW
 from environment.strategies.rgc_mpc.roll_cw import RollCW
-from environment.strategies.rgc_mpc.landing_cw import LandingCW
-# from environment.strategies.rgc_mpc.landing_tb_cw import LandingCW
+# from environment.strategies.rgc_mpc.landing_cw import LandingCW
+from environment.strategies.rgc_mpc.landing_tb_cw import LandingCW
 from environment.strategies.rgc_mpc.prone_tb_cw import ProneCW
 from environment.strategies.rgc_mpc.stand_up import StandUpPhase
 
@@ -42,7 +42,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
         # Instantiate controllers (safe for metadata-only)
         # -------------------------------------------------
         self.controllers = [cls(**kwargs) for cls in CONTROLLER_CLASSES]
-        self.modes = len(self.controllers)
+        self.n_controllers = len(self.controllers)
 
         # -------------------------------------------------
         # Runtime state
@@ -73,7 +73,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
             mode = 0
 
         # Validate mode
-        if mode < 0 or mode >= self.modes:
+        if mode < 0 or mode >= self.n_controllers:
             return np.zeros(12), self.KP, self.KD
         # Ensure that the mpc_fail flag is false before any MPC being solved
         self.robot_states.mpc_fail = False
@@ -117,8 +117,8 @@ class SchedulerRGCMPC(BaseSelfRighting):
             self.KD = self.kd * np.eye(12)
 
         # For future debug
-        # if mode == 6:
-        #     print(f"{self.robot_states.mpc_obj_val},")
+        # if mode == 3:
+        #     print(f"{self.robot_states.ext_contact_force[11, 0]}, {self.robot_states.mpc_fail},")
 
         return self.delta_qr, self.KP, self.KD
 
@@ -128,14 +128,13 @@ class SchedulerRGCMPC(BaseSelfRighting):
     def get_phase_mapping(self):
         """
         Returns:
-            dict: {task_name: task_level}
-
-        Enforces that every controller defines valid
-        semantic metadata.
+            dict:  {task_name: task_level}
+            list:  [task_level per controller_index]
         """
-        phase_mapping = {}
+        phase_mapping = {}  # name → level
+        phase_index_list = [0] * len(self.controllers)  # index → level
 
-        for ctrl in self.controllers:
+        for idx, ctrl in enumerate(self.controllers):
             if ctrl is None:
                 continue
 
@@ -154,9 +153,11 @@ class SchedulerRGCMPC(BaseSelfRighting):
             if ctrl.task_name in phase_mapping:
                 raise ValueError(f"Duplicate task_name '{ctrl.task_name}' detected")
 
+            # populate structures
             phase_mapping[ctrl.task_name] = ctrl.task_level
+            phase_index_list[idx] = ctrl.task_level
 
-        return phase_mapping
+        return phase_mapping, phase_index_list
 
     # -------------------------------------------------
     # Full reset (episode boundary)
@@ -182,16 +183,16 @@ if __name__ == "__main__":
               f"task_level={getattr(ctrl, 'task_level', None)}")
 
     print("\nPhase mapping:")
-    phase_mapping = scheduler.get_phase_mapping()
+    phase_mapping, _ = scheduler.get_phase_mapping()
     for name, level in phase_mapping.items():
         print(f"  {name:15s} -> level {level}")
 
-    print("\nTest update() calls:")
-    for mode in range(len(scheduler.controllers)):
-        dq, KP, KD = scheduler.update(mode)
-        print(f"  Mode {mode}: "
-              f"delta_qr_norm={np.linalg.norm(dq):.3f}, "
-              f"KP_shape={KP.shape}, "
-              f"KD_shape={KD.shape}")
+    # print("\nTest update() calls:")
+    # for mode in range(len(scheduler.controllers)):
+    #     dq, KP, KD = scheduler.update(mode)
+    #     print(f"  Mode {mode}: "
+    #           f"delta_qr_norm={np.linalg.norm(dq):.3f}, "
+    #           f"KP_shape={KP.shape}, "
+    #           f"KD_shape={KD.shape}")
 
     print("\nAll tests completed successfully.")

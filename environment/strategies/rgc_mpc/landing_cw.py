@@ -21,12 +21,13 @@ class LandingCW(BaseRGC):
         self.ts = 0.01
         self.ws = 10
         self.convergence_threshold = 0.05
+        self.sigma = 0
 
         self._update_detector()
 
         self.nx = 29
         self.nu = 12
-        self.ny = 19
+        self.ny = 16
         self.nc = 12  # max joint pos, GRF z component
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -47,7 +48,6 @@ class LandingCW(BaseRGC):
         self.Ca[6:10, 18:22] = np.eye(4)  # Quaternions
         self.Ca[10:13, 23:26] = np.eye(3)  # FL foot (P1)
         self.Ca[13:16, 26:29] = np.eye(3)  # RL foot (P2)
-        self.Ca[16:, 26:29] = np.eye(3)  # RL foot (P3)
 
         self.C_cons[0:12, self.nx:] = np.identity(12)
 
@@ -56,10 +56,9 @@ class LandingCW(BaseRGC):
         Qr = np.diag(np.array([1, 1, 1]))  # FR and RR joints
         Qeps = np.diag(np.array([1, 1, 1, 1]))  # Quaternions
         Qposfl = np.diag(np.array([5, 3, 5]))  # FL foot (P1)
-        Qposrl1 = np.diag(np.array([8, 8, 4]))  # RL foot (P2)
-        Qposrl2 = np.diag(np.array([8, 8, 4]))  # RL foot (P3)
+        Qposrl = np.diag(np.array([8, 8, 4]))  # RL foot (P2)
 
-        Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl1, Qposrl2)
+        Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl)
         self.Q = block_diag(*[Q] * self.N)
 
         # use latter to update self.Q
@@ -79,7 +78,7 @@ class LandingCW(BaseRGC):
         qr = np.array([0.4, 1.5, -2.0, 0.4, 1.5, -2.0]).reshape(6, 1)
         epsr = np.array([0, 0, 0, 1]).reshape(4, 1)
         pos_foot = np.array([0, 0, 0]).reshape(3, 1)
-        ref = np.vstack((qr, epsr, pos_foot, pos_foot, pos_foot))
+        ref = np.vstack((qr, epsr, pos_foot, pos_foot))
         self.ref = np.tile(ref, (self.N, 1))
 
         qr_l = np.array([
@@ -108,6 +107,9 @@ class LandingCW(BaseRGC):
 
         self.active = 1
         self.safe_side = False
+
+        self.P2 = None
+        self.P3 = None
 
     def update_model(self):
 
@@ -248,8 +250,9 @@ class LandingCW(BaseRGC):
             fl_ref, rl_ref1, rl_ref2 = self.feet_references(n=n, R=0.27)
 
             self.ref.reshape(self.N, self.ny)[:, 10:13] = fl_ref
-            self.ref.reshape(self.N, self.ny)[:, 13:16] = rl_ref1
-            self.ref.reshape(self.N, self.ny)[:, 16:19] = rl_ref2
+
+            self.P2 = rl_ref1
+            self.P3 = rl_ref2
 
             l = self.qr_l
             u = self.qr_u
@@ -258,7 +261,12 @@ class LandingCW(BaseRGC):
 
             self.first_int = False
 
-        self.update_Q_weights()
+        sigma = self.compute_sigma()
+        traking_point = (1 - sigma) * self.P2 + sigma * self.P3
+
+        self.robot_states.pc_debug[1, :] = traking_point
+
+        self.ref.reshape(self.N, self.ny)[:, 13:16] = traking_point
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
@@ -268,73 +276,42 @@ class LandingCW(BaseRGC):
 
         return aux_cons, Phi_cons
 
-    def update_Q_weights(self):
-        # current RL foot state (body)
-        # x_rl = self.x[26:29].flatten()
-        # P2 = self.ref[13:16].flatten()
-        sigma = self.compute_sigma()
+    # def compute_sigma(self, d_switch=0.15):
+    #     P2 = self.P2  # 3D
+    #     x_rl = self.x[26:29]
 
-        # base weights
-        Q2 = np.diag([1, 1, 1])  # RL → P2
-        Q3 = np.diag([1, 1, 1])  # RL → P3
-
-        # blend
-        Qrl1 = (1 - sigma) * Q2  # early phase
-        Qrl2 = sigma * Q3  # late phase
-
-        # write into Q matrix
-        for k in range(self.N):
-            base = k * self.single_output_dim  # offset per stage
-
-            idx_RL1 = slice(base + 13, base + 16)
-            idx_RL2 = slice(base + 16, base + 19)
-
-            # assign diagonal only
-            self.Q[idx_RL1, idx_RL1] = Qrl1
-            self.Q[idx_RL2, idx_RL2] = Qrl2
-
-    # def compute_sigma(self):
-    #     P2 = self.ref[13:16]
-    #     d = (self.ref[16:19] - P2)
-    #     R = np.linalg.norm(d)
-    #     if R < 1e-6:
-    #         return 1.0
-    #     d = d / R
-    #     foot = self.x[26:29]
-    #     s = float(d.T @ (foot - P2))
-    #     sigma = s / R
+    #     d = np.linalg.norm(x_rl[:1] - P2[:1])
+    #     sigma = 1.0 - d / d_switch
     #     return float(np.clip(sigma, 0.0, 1.0))
 
-    def compute_sigma(self, eps=0.4):  # eps = 4 cm
-        # Extract references
-        P2 = self.ref[13:16].flatten()  # RL target #1
-        P3 = self.ref[16:19].flatten()  # RL target #2
-        x_rl = self.x[26:29].flatten()  # RL foot state
+    def compute_sigma(self, s0=0.45, lookahead=0.2):
+        """
+            s0: distance threshold (meters) to consider 'near P2'
+            lookahead: distance (meters) the target leads ahead of the robot projection
+            """
+        P2 = self.P2.flatten()
+        P3 = self.P3.flatten()
+        x = self.x[26:29].flatten()
 
-        d = np.linalg.norm(x_rl[:2] - P2[:2])
-        if d < 0.15:
-            return 1
-        else:
-            return 0
-        # sigma = 1 - np.clip(d / 0.25, 0, 1)
+        dist_to_P2 = np.linalg.norm(x[:2] - P2[:2])
 
-        return sigma
+        if self.sigma == 0.0 and dist_to_P2 > s0:
+            return 0.0
 
-        # # XY-only vectors
-        # d_xy = P3[:2] - P2[:2]
-        # R = np.linalg.norm(d_xy)
-        # if R < 1e-6:
-        #     return 1.0
+        d_xy = P3[:2] - P2[:2]
+        L = np.linalg.norm(d_xy)
 
-        # d_xy = d_xy / R
-        # s = float(d_xy @ (x_rl[:2] - P2[:2]))  # projection using only X,Y
+        if L < 1e-6:
+            return 1.0
 
-        # # gating logic
-        # if s <= eps:
-        #     return 0.0
-        # if s >= R:
-        #     return 1.0
+        u_vec = d_xy / L
 
-        # # smoothstep interpolation
-        # t = (s - eps) / (R - eps)
-        # return 3 * t * t - 2 * t * t * t
+        s_robot = float(u_vec @ (x[:2] - P2[:2]))
+        s_target = s_robot + lookahead
+
+        # Normalize to 0..1 range
+        sigma_raw = np.clip(s_target / L, 0.0, 1.0)
+
+        self.sigma = max(self.sigma, sigma_raw)
+
+        return self.sigma
