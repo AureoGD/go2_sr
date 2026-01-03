@@ -2,6 +2,7 @@ import numpy as np
 import pinocchio as pin
 from scipy.linalg import block_diag
 from environment.strategies.rgc_mpc.base_controller import BaseRGC
+from environment.strategies.rgc_mpc.poligon_constraint import SupportPolygonConstraint
 
 
 class RollCW(BaseRGC):
@@ -20,7 +21,7 @@ class RollCW(BaseRGC):
         self.M = 10
         self.ts = 0.01
         self.ws = 30
-        self.convergence_threshold = 0.28
+        self.convergence_threshold = 0.3
 
         self._update_detector()
 
@@ -28,7 +29,7 @@ class RollCW(BaseRGC):
         self.nu = 12
         # self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
         self.ny = 12
-        self.nc = 12  # max joint pos, GRF z component
+        self.nc = 18
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
         self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
@@ -44,7 +45,6 @@ class RollCW(BaseRGC):
 
         # Body orientation
         self.Ca[:, 3:15] = np.eye(12)
-        # self.Ca[12, 16] = 1
 
         self.C_cons[0:12, 23:] = np.identity(12)
 
@@ -77,6 +77,8 @@ class RollCW(BaseRGC):
         self.qr_l = qr_l.reshape(12, 1)
         self.qr_u = qr_u.reshape(12, 1)
 
+        self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
+
         self.Jinv = np.zeros((12, 12), dtype=np.float32)
 
         # (FR=3, FL=0, RR=9, RL=6)
@@ -88,12 +90,14 @@ class RollCW(BaseRGC):
             self.model.getFrameId('RR_thigh_joint'),
         ]
 
-        self.contacts = np.zeros((4, 3), dtype=np.float32)
+        self.contacts = np.zeros((5, 3), dtype=np.float32)
 
         self.first_int = True
 
         self.active = 1
         self.safe_side = False
+
+        # self.polig_const = SupportPolygonConstraint()
 
     def update_model(self):
 
@@ -155,6 +159,12 @@ class RollCW(BaseRGC):
         foot_rl = self.data.oMf[self.model.getFrameId('RL_foot')].translation
         cross_rl = self.skew_symmetric_matrix(foot_rl - mean_pivot)
 
+        self.contacts[0, :] = pivot_rr
+        self.contacts[1, :] = foot_rr
+        self.contacts[2, :] = foot_fr
+        self.contacts[3, :] = pivot_fr
+        self.contacts[4, :] = foot_rl
+
         cross_fl = np.zeros((3, 3))  # only to validate the rotation dynamics
         Sa = np.vstack((cross_fr, cross_fl, cross_rr, cross_rl))
 
@@ -203,14 +213,21 @@ class RollCW(BaseRGC):
 
     def define_constraints_matrices(self):
 
-        # --- PART 1: DEFINE STRUCTURE (Once) ---
         if self.first_int:
-            l = self.qr_l
-            u = self.qr_u
+            l = np.vstack((self.qr_l, -self.com_const))
+            u = np.vstack((self.qr_u, self.com_const))
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
 
             self.first_int = False
+
+        center, r, A_hex, b_hex = self.center_optimizer.solve(self.contacts[1:, :])
+        self.C_cons[12:, 15:17] = A_hex
+        self.u.reshape(self.N, self.nc)[:, 12:] = b_hex
+
+        # Apol, bpol, _ = self.polig_const.solve(self.contacts[1:, :])
+        # self.C_cons[12:, 15:17] = Apol
+        # self.u.reshape(self.N, self.nc)[:, 12:] = bpol
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
