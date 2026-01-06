@@ -276,14 +276,6 @@ class LandingCW(BaseRGC):
 
         return aux_cons, Phi_cons
 
-    # def compute_sigma(self, d_switch=0.15):
-    #     P2 = self.P2  # 3D
-    #     x_rl = self.x[26:29]
-
-    #     d = np.linalg.norm(x_rl[:1] - P2[:1])
-    #     sigma = 1.0 - d / d_switch
-    #     return float(np.clip(sigma, 0.0, 1.0))
-
     def compute_sigma(self, s0=0.45, lookahead=0.2):
         """
             s0: distance threshold (meters) to consider 'near P2'

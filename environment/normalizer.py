@@ -152,6 +152,7 @@ class Go2StateNormalizer:
         'MODE': 61,
         'MPC_FAIL': 62,
         'CURRENT_STATE': 63,
+        'SUCCESS_FLAG': 64,
     }
 
     def __init__(self, box_size=0.5):
@@ -208,6 +209,7 @@ class Go2StateNormalizer:
         normalized[self.IDX['MODE']] = state[self.IDX['MODE']] / self.num_modes
         normalized[self.IDX['MPC_FAIL']] = state[self.IDX['MPC_FAIL']]
         normalized[self.IDX['CURRENT_STATE']] = state[self.IDX['CURRENT_STATE']] / self.num_states
+        normalized[self.IDX['SUCCESS_FLAG']] = state[self.IDX['SUCCESS_FLAG']]
 
         return normalized
 

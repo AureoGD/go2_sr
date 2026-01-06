@@ -69,7 +69,7 @@ class StandUpPhase(BaseRGC):
         # Update control action weight matrix
         dqrWeight = np.array([1, 1, 1])
         Rdqr = np.diag(dqrWeight)
-        R = block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
+        R = 0.75 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
         self.R = block_diag(*[R] * self.M)
 
         # rzRef = np.array([[0.25]]).reshape(1, 1)

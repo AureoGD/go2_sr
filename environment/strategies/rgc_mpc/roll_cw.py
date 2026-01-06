@@ -21,14 +21,13 @@ class RollCW(BaseRGC):
         self.M = 10
         self.ts = 0.01
         self.ws = 30
-        self.convergence_threshold = 0.3
+        self.convergence_threshold = 0.35
 
         self._update_detector()
 
         self.nx = 23
         self.nu = 12
-        # self.ny = 4 + 3 + 3 + 1  # orientation, q FL pos, q FR pos, romega_x
-        self.ny = 12
+        self.ny = 16
         self.nc = 18
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -44,17 +43,24 @@ class RollCW(BaseRGC):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:, 3:15] = np.eye(12)
-
+        self.Ca[:12, 3:15] = np.eye(12)
+        self.Ca[12:, 18:22] = np.eye(4)
         self.C_cons[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
         Qfl = np.diag(np.array([1, 1, 1]))
         Qrl = np.diag(np.array([1, 1, 1]))
+        Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))
 
-        Q = block_diag(Qrl, Qfl, Qrl, Qfl)
+        Q = block_diag(Qrl, Qfl, Qrl, Qfl, Qeps)
         self.Q = block_diag(*[Q] * self.N)
+
+        # References
+        qr = np.array([0.4, 1.5, -2.0, -0.6, 1.3, -2.6, 0.4, 1.5, -2.0, 0.4, 3.75, -1.5]).reshape(12, 1)
+        qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
+        ref = np.vstack((qr, qeps))
+        self.ref = np.tile(ref, (self.N, 1))
 
         # Update control action weight matrix
         Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
@@ -64,9 +70,6 @@ class RollCW(BaseRGC):
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
-        qr = np.array([0.4, 1.5, -2.0, -0.8, 1.0, -2.6, 0.4, 1.5, -2.0, 0.4, 3.75, -1.5]).reshape(12, 1)
-
-        self.ref = np.tile(qr, (self.N, 1))
 
         qr_l = np.array([
             -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
@@ -214,6 +217,10 @@ class RollCW(BaseRGC):
     def define_constraints_matrices(self):
 
         if self.first_int:
+            current_yaw = self.robot_states.r_pos[2, 0]
+            quat_ref, R_ref = self.eps_reference(current_yaw=current_yaw)
+            self.ref.reshape(self.N, self.ny)[:, 12:] = quat_ref
+
             l = np.vstack((self.qr_l, -self.com_const))
             u = np.vstack((self.qr_u, self.com_const))
             self.l = np.tile(l, (self.N, 1))

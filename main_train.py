@@ -22,10 +22,11 @@ from es_framework.components.policy import Policy
 from es_framework.components.logger import TrainingLogger
 from environment.go2_env import Go2Env
 
-
 # ============================================================
 # POOL CREATION
 # ============================================================
+
+
 def create_pool(num_workers, config, heartbeat_array):
     return mp.Pool(processes=num_workers, initializer=init_worker, initargs=(config, heartbeat_array))
 
@@ -43,7 +44,7 @@ def main():
         "job_name": "go2_self_righting",
         "pop_size": 40,
         "num_scenarios": 5,
-        "max_generations": 250,
+        "max_generations": 500,
         "max_workers": 20,
         "sigma_init": 0.05,
         "sigma_decay": 0.995,
@@ -83,9 +84,17 @@ def main():
     # --------------------------------------------------------
     # HEARTBEAT (PER TASK)
     # --------------------------------------------------------
-    heartbeat_array = mp.Array("d", total_tasks)
 
+    pool = None
+
+    heartbeat_array = mp.Array("d", total_tasks)
     pool = create_pool(num_workers, config, heartbeat_array)
+
+    # --------------------------------------------------------
+    # Previous pool implementation
+    # --------------------------------------------------------
+
+    # pool = create_pool(num_workers, config, heartbeat_array)
 
     STARTUP_TIME = time.time()
     STARTUP_GRACE_SEC = 30.0

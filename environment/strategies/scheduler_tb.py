@@ -5,18 +5,17 @@ from environment.strategies.base_self_righting import BaseSelfRighting
 # Import controllers
 # -------------------------------------------------
 from environment.strategies.rgc_mpc.hold_position import HoldPosition
-from environment.strategies.rgc_mpc.go_safe import GoSafe
-from environment.strategies.rgc_mpc.prepare_cwII import PrepareCW
-from environment.strategies.rgc_mpc.roll_cw import RollCW
-from environment.strategies.rgc_mpc.landing_cw import LandingCW
-from environment.strategies.rgc_mpc.stand_up import StandUpPhase
-
+from environment.strategies.time_based.go_safe_tb import GoSafe
+from environment.strategies.time_based.prepare_cw_tb import PrepareCW
+from environment.strategies.time_based.roll_cw_tb import RollCW
+from environment.strategies.time_based.landing_cw_tb import LandingCW
 from environment.strategies.time_based.prone_cw_tb import ProneCW
+from environment.strategies.time_based.standin_up_tb import StandUpPhase
 
 CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUpPhase]
 
 
-class SchedulerRGCMPC(BaseSelfRighting):
+class SchedulerTB(BaseSelfRighting):
     """
     Mode-based RGC-MPC scheduler.
 
@@ -47,7 +46,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
         # -------------------------------------------------
         # Runtime state
         # -------------------------------------------------
-        self.last_mode = None
+        self.last_controller = None
         self.delta_qr = np.zeros(12)
 
         # -------------------------------------------------
@@ -59,66 +58,29 @@ class SchedulerRGCMPC(BaseSelfRighting):
     # -------------------------------------------------
     # Main update entry point
     # -------------------------------------------------
-    def update(self, mode=None):
+    def update(self, controller=None):
         """
         Args:
-            mode (int): Selected by the neural network.
+            controller (int): Selected by the neural network.
         Returns:
             delta_qr (np.ndarray): Joint reference increment
             KP (np.ndarray): Proportional gains
             KD (np.ndarray): Derivative gains
         """
         # Safety fallback
-        if mode is None:
-            mode = 0
+        if controller is None:
+            controller = 0
 
-        # Validate mode
-        if mode < 0 or mode >= self.n_controllers:
+        # Validate controller
+        if controller < 0 or controller >= self.n_controllers:
             return np.zeros(12), self.KP, self.KD
-        # Ensure that the mpc_fail flag is false before any MPC being solved
-        self.robot_states.mpc_fail = False
 
-        # -------------------------------------------------
-        # Handle transitions
-        # Reset the NEW controller on entry (by design)
-        # -------------------------------------------------
-        if self.last_mode != mode:
-            self.controllers[mode].reset_controller()
-            self.last_mode = mode
+        if self.last_controller != controller:
+            self.controllers[controller].reset_controller()
+            self.last_controller = controller
 
-        # -------------------------------------------------
-        # Execute active controller
-        # -------------------------------------------------
-        active_ctrl = self.controllers[mode]
+        active_ctrl = self.controllers[controller]
         self.delta_qr = active_ctrl.update_dqr().reshape(12)
-
-        # -------------------------------------------------
-        # Dynamic gains logic (RGC specific)
-        # -------------------------------------------------
-        if mode == 0:
-            # HOLD / SAFE
-            self.KP = self.kp * np.eye(12)
-            self.KD = self.kd * np.eye(12)
-
-        elif mode == 1:
-            # GoSafe: softer damping
-            self.KP = self.kp * np.eye(12)
-            self.KD = (self.kd / 10.0) * np.eye(12)
-
-        elif mode in [2, 3, 4]:
-            # Prepare / Roll / Landing CW
-            self.KP = self.kp * np.eye(12)
-            self.KD = self.kd * np.eye(12)
-            self.KD[3:6, 3:6] = (self.kd / 10.0) * np.eye(3)
-
-        else:
-            # StandUp or future controllers
-            self.KP = self.kp * np.eye(12)
-            self.KD = self.kd * np.eye(12)
-
-        # For future debug
-        # if mode == 3:
-        #     print(f"{self.robot_states.mpc_obj_val},")
 
         return self.delta_qr, self.KP, self.KD
 
@@ -163,7 +125,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
     # Full reset (episode boundary)
     # -------------------------------------------------
     def reset_phase(self):
-        self.last_mode = None
+        self.last_controller = None
         for ctrl in self.controllers:
             if hasattr(ctrl, "reset_controller"):
                 ctrl.reset_controller()
@@ -173,7 +135,7 @@ if __name__ == "__main__":
     print("=== Testing SchedulerRGCMPC ===")
 
     # Create dummy scheduler (no robot_states)
-    scheduler = SchedulerRGCMPC()
+    scheduler = SchedulerTB()
 
     print("\nControllers list:")
     for i, ctrl in enumerate(scheduler.controllers):
@@ -188,9 +150,9 @@ if __name__ == "__main__":
         print(f"  {name:15s} -> level {level}")
 
     # print("\nTest update() calls:")
-    # for mode in range(len(scheduler.controllers)):
-    #     dq, KP, KD = scheduler.update(mode)
-    #     print(f"  Mode {mode}: "
+    # for controller in range(len(scheduler.controllers)):
+    #     dq, KP, KD = scheduler.update(controller)
+    #     print(f"  Mode {controller}: "
     #           f"delta_qr_norm={np.linalg.norm(dq):.3f}, "
     #           f"KP_shape={KP.shape}, "
     #           f"KD_shape={KD.shape}")

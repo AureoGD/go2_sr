@@ -143,6 +143,15 @@ class BaseRGC:
         self.convergence_threshold = 0.15
         self.ws = 20
 
+        qr_l = np.array([
+            -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
+        ])
+        qr_u = np.array(
+            [1.0472, 3.4907, -0.83776, 1.0472, 3.4907, -0.83776, 1.0472, 4.5379, -0.83776, 1.0472, 4.5379, -0.83776])
+
+        self.qr_l = qr_l.reshape(12, 1)
+        self.qr_u = qr_u.reshape(12, 1)
+
         self.center_optimizer = ChebyshevCenterSolver()
 
     def _update_detector(self):

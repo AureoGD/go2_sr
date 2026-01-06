@@ -9,6 +9,7 @@ from environment.robot_states import RobotStates
 from scipy.spatial.transform import Rotation
 from environment.strategies.unitree_self_righting import UnitreeSelfRighting
 from environment.strategies.scheduler_rgc_mpc import SchedulerRGCMPC
+from environment.strategies.scheduler_tb import SchedulerTB
 from environment.strategies.rgc_mpc.base_controller import BaseRGC
 import itertools
 import signal
@@ -23,6 +24,7 @@ np.set_printoptions(linewidth=1000, precision=3)
 class Go2ModelSimMuJoCo():
 
     def __init__(self, task_control=None, render=False, strategy_name='unitree', **kwargs):
+        self._closed = False
         self._is_render = render
         self.pin_model = None
         self.pin_data = None
@@ -58,8 +60,6 @@ class Go2ModelSimMuJoCo():
             root_joint = pin.JointModelFreeFlyer()
             self.pin_model = pin.buildModelFromUrdf(urdf_path, root_joint)
             self.pin_data = self.pin_model.createData()
-            self.geo_model = pin.buildGeomFromUrdf(self.pin_model, urdf_path, pin.GeometryType.COLLISION)
-            self.geom_data = pin.GeometryData(self.geo_model)
         else:
             self.geom_data = None
 
@@ -117,25 +117,19 @@ class Go2ModelSimMuJoCo():
         if self.task_control is None:
             if strategy_name == 'rgc':
                 self.task_control = SchedulerRGCMPC(**config)
+            elif strategy_name == 'tb':
+                self.task_control = SchedulerTB(**config)
             else:
                 self.task_control = UnitreeSelfRighting(**config)
-
-        # ====================================================
-        # TIMEOUT HANDLER (NEW)
-        # ====================================================
-        signal.signal(signal.SIGALRM, self._timeout_handler)
 
         self._update_robot_sim_states()
 
     # ========================================================
-    # SAFETY HELPERS (NEW)
+    # SAFETY HELPERS
     # ========================================================
     def _assert_finite(self, name, x):
         if not np.all(np.isfinite(x)):
             raise FloatingPointError(f"[NaN/Inf DETECTED] {name}: {x}")
-
-    def _timeout_handler(self, signum, frame):
-        raise TimeoutError("MuJoCo mj_step timeout")
 
     # ========================================================
     # JOINT MAPPING (ORIGINAL — UNTOUCHED)
@@ -246,25 +240,20 @@ class Go2ModelSimMuJoCo():
         self.base_rgc.com_quatities()
 
     # ========================================================
-    # MAIN LOOP (TIMEOUT-PROTECTED)
+    # MAIN LOOP
     # ========================================================
     def control_loop(self, mode):
         if mode != -1:
             self._task_control(mode)
-
             if self.robot_states.critical_mpc_fail:
                 return
 
         for _ in range(int(self.con_dt / self.dyn_dt)):
-            signal.alarm(1)
-            try:
-                tau = self._low_level_control()
-                self._physics(tau)
-            finally:
-                signal.alarm(0)
+            tau = self._low_level_control()
+            self._physics(tau)
 
         if self._is_render and self.viewer:
-            self.debug_viwer()
+            # self.debug_viwer()
             self.viewer.sync()
             time.sleep(self.con_dt)
 
@@ -300,6 +289,31 @@ class Go2ModelSimMuJoCo():
             pos=[x, y, z],
             mat=np.eye(3).flatten(),
             rgba=[0, 1, 1, 1])
+
+        geom_id = self.viewer.user_scn.ngeom
+        self.viewer.user_scn.ngeom += 1
+
+        base_id = self.pin_model.getFrameId("base_link")
+
+        p_base = np.asarray(self.robot_states.b_pos).reshape(3)
+        R_base = np.asarray(self.pin_data.oMf[base_id].rotation).reshape(3, 3)
+
+        offset_base = np.array([0.0, 0.0, 0.06755])
+        plane_pos = p_base + R_base @ offset_base
+        R_b_plane = self.roty(-5)
+        plane_R = R_base @ R_b_plane
+
+        mujoco.mjv_initGeom(self.viewer.user_scn.geoms[geom_id],
+                            type=mujoco.mjtGeom.mjGEOM_PLANE,
+                            size=np.array([0.5, 0.5, 0.01], dtype=np.float64),
+                            pos=np.array(plane_pos, dtype=np.float64),
+                            mat=np.array(plane_R.flatten(), dtype=np.float64),
+                            rgba=np.array([0.0, 1.0, 1.0, 0.4], dtype=np.float32))
+
+    def roty(self, theta):
+        theta = np.pi * theta / 180
+        c, s = np.cos(theta), np.sin(theta)
+        return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
 
     # ========================================================
     # TASK CONTROL (UNCHANGED)
@@ -394,5 +408,24 @@ class Go2ModelSimMuJoCo():
     # RESET / CLOSE (UNCHANGED)
     # ========================================================
     def close(self):
-        if self.viewer:
-            self.viewer.close()
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
+
+        # Viewer first
+        if self.viewer is not None:
+            try:
+                self.viewer.close()
+            except Exception:
+                pass
+            self.viewer = None
+
+        # Explicitly drop MuJoCo references
+        self.data = None
+        self.model = None
+
+        # Drop Pinocchio references
+        self.pin_data = None
+        self.pin_model = None
+        self.geo_model = None
+        self.geom_data = None

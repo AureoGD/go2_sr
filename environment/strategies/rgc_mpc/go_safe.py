@@ -21,7 +21,7 @@ class GoSafe(BaseRGC):
         self.ws = 15
         self._update_detector()
 
-        self.nx = 24
+        self.nx = 12
         self.nu = 12
         self.ny = 12
         self.nc = 18
@@ -34,31 +34,32 @@ class GoSafe(BaseRGC):
 
         self.C_cons = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
 
-        self.A[12:, 0:12] = np.identity(12)
-
-        self.Aa[24:, 24:] = np.identity(self.nu)
-        self.Ba[24:, :] = np.identity(self.nu)
+        self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
+        self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # joint position
-        self.Ca[:, 12:24] = np.identity(12)
+        self.Ca[:, 0:12] = np.identity(12)
 
-        # rx and rz
-        self.C_cons[0:12, 12:24] = np.identity(12)
+        self.C_cons[0:12, 12:] = np.identity(12)
 
-        self.contacts = np.zeros((4, 3), dtype=np.float32)
+        M = np.diag([0.02, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005])
 
-        self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
+        M_diag = np.diag(M)  # shape (12,)
+        Kp_diag = self.kp  # scalar or shape (12,)
+
+        self.lambda_vec = np.sqrt(Kp_diag / M_diag)
+
+        self.alpha = np.eye(12) - self.ts * np.diag(self.lambda_vec)
 
         Qq = 1 * np.eye(12)
 
         self.Q = block_diag(*[Qq] * self.N)
 
-        dqrWeight = 2.25 * np.array([1, 1, 1])
+        dqrWeight = 10 * np.array([1, 1, 1])
         Rdqr = np.diag(dqrWeight)
         R = block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
         self.R = block_diag(*[R] * self.M)
 
-        # qr = np.array([[0, 0, -2.7, 0, 0, -2.7, 0, 0, -2.7, 0, 0, -2.7]]).transpose()
         qr = np.array([[0.7, 1.4, -2.6, -0.7, 1.4, -2.6, 0.7, 1.4, -2.6, -0.7, 1.4, -2.6]]).transpose()
         self.ref = np.tile(qr, (self.N, 1))
 
@@ -70,7 +71,7 @@ class GoSafe(BaseRGC):
 
         self.radius = 0.030
         self.d_safe = 0.005
-        # Stack for all 4 feet
+
         self.qr_l = qr_l.reshape(12, 1)
         self.qr_u = qr_u.reshape(12, 1)
 
@@ -86,47 +87,36 @@ class GoSafe(BaseRGC):
 
         self.first_int = True
 
-        self.min_obj_val = 100
-
     def update_model(self):
         self._q, dq = self.ordering_joints()
         q = self._q
 
-        # 1. COMPUTE ALL KINEMATICS (Positions and Velocities)
-        # Do this once at the beginning.
         pin.forwardKinematics(self.model, self.data, q, dq)
         pin.updateFramePlacements(self.model, self.data)
 
-        # 2. COMPUTE JOINT-SPACE MATRICES
         pin.crba(self.model, self.data, q)
         pin.computeCoriolisMatrix(self.model, self.data, q, dq)
 
-        # 3. COMPUTE ALL CENTROIDAL QUANTITIES
         pin.ccrba(self.model, self.data, q, dq)
-
-        M = block_diag(self.data.M[9:12, 9:12], self.data.M[6:9, 6:9], self.data.M[12:, 12:])
-        C = block_diag(self.data.C[9:12, 9:12], self.data.C[6:9, 6:9], self.data.C[12:, 12:])
 
         r = self.data.com[0]
         dr = self.data.vcom[0]
 
-        # Save states
+        M = block_diag(self.data.M[9:12, 9:12], self.data.M[6:9, 6:9], self.data.M[12:, 12:])
+
+        M_diag = M.diagonal()
+
+        self.lambda_vec = np.sqrt(self.kp / M_diag)
+
+        self.alpha = np.eye(12) - self.ts * np.diag(self.lambda_vec)
+
         self.robot_states.r_vel = dr.reshape(3, 1)
         self.robot_states.r_pos = r.reshape(3, 1)
 
-        M_inv = np.linalg.inv(M)
+        self.Aa[0:12, 0:12] = self.alpha
+        self.Aa[0:12, 12:] = np.eye(12) - self.alpha
 
-        self.A[0:12, 0:12] = -M_inv @ (C + self.kd / 10 * np.identity(12))
-        self.A[0:12, 12:] = -self.kp * M_inv @ np.identity(12)
-
-        self.B[0:12, :] = self.kp * M_inv @ np.identity(12)
-
-        self.Aa[0:self.nx, 0:self.nx] = np.identity(self.nx) + self.ts * self.A
-        self.Aa[0:self.nx, self.nx:] = self.ts * self.B
-
-        self.Ba[0:self.nx, :] = self.ts * self.B
-
-        self.x = np.vstack((self.robot_states.dq, self.robot_states.q, self.robot_states.qr))
+        self.x = np.vstack((self.robot_states.q, self.robot_states.qr))
 
     def define_constraints_matrices(self):
 
@@ -199,16 +189,16 @@ class GoSafe(BaseRGC):
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
-        self.C_cons[12:, 0:12] = self.ts * J
+        self.C_cons[12:, 0:12] = self.ts * J @ (self.lambda_vec * -np.eye(12)).reshape(12, 12)
+        self.C_cons[12:, 12:] = self.ts * J @ (self.lambda_vec * np.eye(12)).reshape(12, 12)
         Phi_cons[:self.nc, :] = self.C_cons @ self.Aa
         aux_cons = self.C_cons @ self.Ba
         if self.first_int:
             l = np.vstack((self.qr_l, dist))
             u = np.vstack((self.qr_u, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf))
+
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
-            # self.l = np.tile(self.qr_l, (self.N, 1))
-            # self.u = np.tile(self.qr_u, (self.N, 1))
 
         return aux_cons, Phi_cons
 
@@ -272,21 +262,14 @@ class GoSafe(BaseRGC):
         return c1, c2, dist, n
 
     def get_jacobian_at_point(self, point_world, frame_id, q):
-        # Get frame placement (Rotation and Translation)
         oMf = self.data.oMf[frame_id]
 
-        # Calculate vector 'r' (Lever Arm) from Frame Origin to Point
-        # r must be in WORLD coordinates for this formula
         r_vec = point_world - oMf.translation
 
-        # Get standard Frame Jacobian (6xN) in WORLD alignment
         J_frame = pin.computeFrameJacobian(self.model, self.data, q, frame_id, pin.LOCAL_WORLD_ALIGNED)
-        J_linear_frame = J_frame[:3, :]  # Top 3 rows (Linear velocity)
-        J_angular_frame = J_frame[3:, :]  # Bottom 3 rows (Angular velocity)
+        J_linear_frame = J_frame[:3, :]
+        J_angular_frame = J_frame[3:, :]
 
-        # Shift Jacobian to the point: J_point = J_lin - Skew(r) * J_ang
-        # Logic: v_point = v_frame + w x r  =>  v_point = v_frame - r x w
-        # Cross product matrix (Skew symmetric)
         r_skew = pin.skew(r_vec)
 
         J_point_linear = J_linear_frame - r_skew @ J_angular_frame

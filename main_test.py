@@ -11,11 +11,14 @@ from es_framework.components.policy import Policy
 from environment.phase_library import PhaseLibrary
 from environment.phase_spawner import PhaseSpawner
 
-USE_TRAINED_POLICY = True
+from collections import deque
+import pickle
 
-RESULTS_DIR = "results/go2_self_righting_CEM_20260102_122408"
+USE_TRAINED_POLICY = False
+
+RESULTS_DIR = "results/go2_self_righting_CEM_20260105_095825"
 MODEL_DIR = os.path.join(RESULTS_DIR, "models")
-MODEL_FILE = "gen_0250.pth"
+MODEL_FILE = "best_overall.pth"
 CONFIG_FILE = os.path.join(RESULTS_DIR, "config.json")
 
 DIFFICULTY = 1.0
@@ -89,53 +92,75 @@ def main():
     phase_lib = PhaseLibrary()
     phase_spawner = PhaseSpawner(phase_lib)
 
-    scenarios = [phase_spawner.apply() for _ in range(20)]
+    scenarios = [phase_spawner.apply() for _ in range(1)]
+
+    qr_states = deque()
+    dq_states = deque()
+    q_states = deque()
 
     try:
         ep = 0
         for s in scenarios:
             print(f"\n--- Episode {ep + 1} ---")
-            r0 = [0, 0, 0]
-            # r0 = [0, 0, 0]
-            b0 = [0, 0, 0.2]
-            q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
+            r0 = [np.pi, 0, 0]
+            q0 = [0.0, -0.5, -1.5, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
             # q0, r0, b0, mode = s
-            obs, info = env.reset(b0=b0, r0=r0, q0=q0)
+            # obs, info = env.reset(b0=b0, r0=r0, q0=q0, mode=5)
+            obs, info = env.reset(r0=r0, q0=q0)
             # print(f"\n--- Mode {mode} ---")
             total_reward = 0.0
             tick = 0
 
             start_time = time.perf_counter()
 
-            for step in range(EPISODE_LENGTH):
+            for step in range(1500):
 
                 if USE_TRAINED_POLICY:
                     with torch.no_grad():
                         action, _ = policy.predict(obs, deterministic=True)
                         action = int(action)
                 else:
-                    # action = 0
-                    if tick < 20:
+                    if tick < 25:
                         action = 0
-                    elif tick < 150:
-                        action = 1  # go_safe
-                    elif tick < 150 + 185:
-                        action = 2  # prepare_cw
-                    elif tick < 150 + 185 + 150:
-                        action = 3  # roll_cw
-                    elif tick < 150 + 185 + 150 + 250:
-                        action = 4  # landing_cw
-                    elif tick < 150 + 185 + 150 + 250 + 270:
-                        action = 5  # prone
-                    elif tick < 150 + 185 + 150 + 250 + 270 + 300:
-                        action = 6  # standing_up
+                    elif tick < 25 + 120:
+                        action = 1
+                    elif tick < 25 + 120 + 310:
+                        action = 2
+                    elif tick < 25 + 120 + 310 + 370:
+                        action = 3
+                    elif tick < 25 + 120 + 310 + 370 + 300:
+                        action = 4
+                    elif tick < 25 + 120 + 310 + 370 + 300 + 210:
+                        action = 5
+                    elif tick < 25 + 120 + 310 + 370 + 300 + 210 + 210:
+                        action = 6
                     else:
                         action = 0
-
-                print(action)
+                    # if tick < 20:
+                    #     action = 0
+                    # elif tick < 150:
+                    #     action = 1  # go_safe
+                    # elif tick < 150 + 185:
+                    #     action = 2  # prepare_cw
+                    # elif tick < 150 + 185 + 130:
+                    #     action = 3  # roll_cw
+                    # elif tick < 150 + 185 + 130 + 250:
+                    #     action = 4  # landing_cw
+                    # elif tick < 150 + 185 + 130 + 250 + 270:
+                    #     action = 5  # prone
+                    # elif tick < 150 + 185 + 130 + 250 + 270 + 300:
+                    #     action = 6  # standing_up
+                    # else:
+                    #     action = 0
 
                 obs, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
+                q = env.robot_sim.robot_states.q.copy()
+                dq = env.robot_sim.robot_states.dq.copy()
+                qr = env.robot_sim.robot_states.qr.copy()
+                q_states.append(q.flatten())
+                dq_states.append(dq.flatten())
+                qr_states.append(qr.flatten())
 
                 if terminated or truncated:
                     elapsed = time.perf_counter() - start_time
@@ -149,6 +174,16 @@ def main():
                     break
 
                 tick += 1
+
+        print("Test")
+        data = {
+            "q": q_states,
+            "dq": dq_states,
+            "qr": qr_states,
+        }
+
+        with open("joint_states_2.pkl", "wb") as f:
+            pickle.dump(data, f)
 
     except KeyboardInterrupt:
         print("\nEvaluation interrupted by user.")
