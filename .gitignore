@@ -3,3 +3,5 @@ logs
 models
 results
 vizenv
+venv
+joint_states_2.pkl
