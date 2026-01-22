@@ -1,0 +1,13 @@
+numpy
+torch
+gymnasium
+mujoco
+pin
+scipy
+osqp
+tqdm
+psutil
+opencv-python
+noise
+matplotlib
+typing_extensions
