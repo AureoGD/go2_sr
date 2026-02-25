@@ -27,10 +27,18 @@ class RobotStates:
 
     pc_debug: np.ndarray = field(default_factory=lambda: np.zeros((3, 3), dtype=np.float64))
 
-    mpc_fail: bool = field(default=False)
-    critical_mpc_fail: bool = field(default=False)
-    subtask_succes: bool = field(default=False)
     mpc_obj_val: float = field(default=0)
-    current_sucess_mode: float = field(default=0)
+    mpc_fail: bool = field(default=False)
+    mpc_critical_fail: bool = field(default=False)
+
     # robot phases: holding, safe, prepared_to_roll, end_roll, landed, end_proning, end_standin
     sr_mode_completed: List[bool] = field(default_factory=lambda: [False] * 7)
+    sr_controller_sucess_percent: float = field(default=0)
+    sr_current_controller: float = field(default=0)
+
+    lambda_max: float = field(default=0)
+    primal_res: float = field(default=0)
+    dual_res: float = field(default=0)
+
+    subtask_succes: bool = field(default=False)
+    current_sucess_mode: float = field(default=0)

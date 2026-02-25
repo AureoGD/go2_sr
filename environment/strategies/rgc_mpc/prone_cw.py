@@ -5,15 +5,16 @@ from environment.strategies.rgc_mpc.base_controller import BaseRGC
 from environment.strategies.rgc_mpc.poligon_constraint import SupportPolygonConstraint
 
 
-class RollCW(BaseRGC):
+class ProneCW(BaseRGC):
 
-    TASK_NAME = "roll_cw"
-    TASK_LEVEL = 3
+    TASK_NAME = "prone_cw"
+    TASK_LEVEL = 5
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
         if not self.runtime:
+            # Metadata-only: nothing else to do
             return
 
         self.N = 20
@@ -26,8 +27,8 @@ class RollCW(BaseRGC):
 
         self.nx = 23
         self.nu = 12
-        self.ny = 16
-        self.nc = 18
+        self.ny = 4
+        self.nc = 17
 
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
         self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
@@ -42,42 +43,30 @@ class RollCW(BaseRGC):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:12, 3:15] = np.eye(12)
-        self.Ca[12:, 18:22] = np.eye(4)
+        self.Ca[:, 18:22] = np.eye(4)
+
         self.C_cons[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qfl = np.diag(np.array([1, 1, 1]))
-        Qrl = np.diag(np.array([1, 1, 1]))
-        Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))
+        Qeps = 1 * np.diag(np.array([1, 1, 1, 1]))
 
-        Q = block_diag(Qrl, Qfl, Qrl, Qfl, Qeps)
+        Q = block_diag(Qeps)
         self.Q = block_diag(*[Q] * self.N)
 
         # References
-        qr = np.array([0.4, 1.5, -2.0, -0.6, 1.3, -2.6, 0.4, 1.5, -2.0, 0.4, 3.75, -1.5]).reshape(12, 1)
         qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
-        ref = np.vstack((qr, qeps))
+        ref = qeps
         self.ref = np.tile(ref, (self.N, 1))
 
         # Update control action weight matrix
-        Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrfl = np.diag(np.array([1, 1, 1]))
-        Rdqrr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrl = 75 * np.diag(np.array([1, 1, 1]))
+        Rdqfr = 1 * np.diag(np.array([1, 1, 1]))
+        Rdqfl = 1 * np.diag(np.array([1, 1, 1]))
+        Rdqrr = 1 * np.diag(np.array([1, 1, 1]))
+        Rdqrl = 1 * np.diag(np.array([1, 1, 1]))
 
-        R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
+        R = block_diag(Rdqfr, Rdqfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
-
-        qr_l = np.array([
-            -1.0472, -1.5708, -2.7227, -1.0472, -1.5708, -2.7227, -1.0472, -0.5236, -2.7227, -1.0472, -0.5236, -2.7227
-        ])
-        qr_u = np.array(
-            [1.0472, 3.4907, -0.83776, 1.0472, 3.4907, -0.83776, 1.0472, 4.5379, -0.83776, 1.0472, 4.5379, -0.83776])
-
-        self.qr_l = qr_l.reshape(12, 1)
-        self.qr_u = qr_u.reshape(12, 1)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
 
@@ -85,7 +74,6 @@ class RollCW(BaseRGC):
 
         # (FR=3, FL=0, RR=9, RL=6)
         # Contact at front-right foot, rear-right foot and rear-left foot
-        self.leg_idx = [3, 9]
 
         self.contact_ids = [
             self.model.getFrameId('FR_thigh_joint'),
@@ -96,8 +84,16 @@ class RollCW(BaseRGC):
 
         self.first_int = True
 
-        self.active = 1
-        self.safe_side = False
+        self.L = np.zeros((3, self.nx + self.nu), dtype=np.float32)
+        self.L[:, 12:15] = -self.kp * np.identity(3)
+        self.L[:, 32:35] = self.kp * np.identity(3)
+
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 35])
+        foot_u = np.array([0, 0, np.inf, np.inf, 100])
+
+        # Stack for all 4 feet
+        self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))  # Shape: (20, 1)
+        self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))  # Shape: (20, 1)
 
         # self.polig_const = SupportPolygonConstraint()
 
@@ -150,6 +146,8 @@ class RollCW(BaseRGC):
 
         Jc[3:6:, 3:6] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('FL_foot'),
                                                  pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 6:9]
+        foot_fl = self.data.oMf[self.model.getFrameId('FL_foot')].translation
+        cross_fl = self.skew_symmetric_matrix(foot_fl - mean_pivot)
 
         Jc[6:9, 6:9] = pin.computeFrameJacobian(self.model, self.data, q, self.model.getFrameId('RR_foot'),
                                                 pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[0:3, 15:18]
@@ -167,12 +165,9 @@ class RollCW(BaseRGC):
         self.contacts[3, :] = pivot_fr
         self.contacts[4, :] = foot_rl
 
-        cross_fl = np.zeros((3, 3))  # only to validate the rotation dynamics
         Sa = np.vstack((cross_fr, cross_fl, cross_rr, cross_rl))
 
         gamma = Jc
-        gamma[3:6, :] = np.hstack((np.zeros((3, 3)), (np.eye(3)), np.zeros((3, 6))))
-
         gamma_a_star = np.linalg.inv(gamma) @ Sa
 
         self.Jinv = np.linalg.inv(Jc.T)
@@ -213,30 +208,38 @@ class RollCW(BaseRGC):
         self.x = np.vstack((self.robot_states.omega, self.robot_states.q, self.robot_states.r_pos,
                             self.robot_states.epsilon, -9.81, self.robot_states.qr))
 
+        self.L[:, 0:3] = -self.kd * gamma_a_star[9:, :]
+
     def define_constraints_matrices(self):
 
-        if self.first_int:
-            current_yaw = self.robot_states.r_pos[2, 0]
-            quat_ref, R_ref = self.eps_reference(current_yaw=current_yaw)
-            self.ref.reshape(self.N, self.ny)[:, 12:] = quat_ref
+        Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.nc, self.nu))
 
-            l = np.vstack((self.qr_l, -self.com_const))
-            u = np.vstack((self.qr_u, self.com_const))
+        if self.first_int:
+            yaw = self.robot_states.rpy[2, 0]
+            epsRef, _ = self.eps_reference(
+                current_yaw=yaw,
+                desired_yaw=None  # Keep current yaw
+            )
+            epsRef = epsRef.reshape(4, 1)
+            self.ref = np.tile(epsRef, (self.N, 1))
+
+            l = np.vstack((self.qr_l, self.f_l))
+            u = np.vstack((self.qr_u, self.f_u))
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
 
             self.first_int = False
 
-        center, r, A_hex, b_hex = self.center_optimizer.solve(self.contacts[1:, :])
-        self.C_cons[12:, 15:17] = A_hex
-        self.u.reshape(self.N, self.nc)[:, 12:] = b_hex
+        n_rl, t1_rl, t2_rl = self.cont_surfaces(self.contacts[4, :], self.contacts[0, :], self.contacts[1, :])
 
-        # Apol, bpol, _ = self.polig_const.solve(self.contacts[1:, :])
-        # self.C_cons[12:, 15:17] = Apol
-        # self.u.reshape(self.N, self.nc)[:, 12:] = bpol
+        mu = 0.7 / np.sqrt(2)
+        Cf_rl = self.cf_matrix(n_rl, t1_rl, t2_rl, mu)
 
-        Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
-        aux_cons = np.zeros((self.nc, self.nu))
+        Fc_mtx = -Cf_rl @ self.Jinv[9:, 9:]
+        self.C_cons[12:, :] = Fc_mtx @ self.L
+        Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
+        aux_cons = self.C_cons @ self.Ba
 
         Phi_cons[0:self.nc, :] = self.C_cons @ self.Aa
         aux_cons = self.C_cons @ self.Ba

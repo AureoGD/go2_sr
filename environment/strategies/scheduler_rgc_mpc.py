@@ -9,9 +9,10 @@ from environment.strategies.rgc_mpc.go_safe import GoSafe
 from environment.strategies.rgc_mpc.prepare_cwII import PrepareCW
 from environment.strategies.rgc_mpc.roll_cw import RollCW
 from environment.strategies.rgc_mpc.landing_cw import LandingCW
+from environment.strategies.rgc_mpc.prone_cw import ProneCW
 from environment.strategies.rgc_mpc.stand_up import StandUpPhase
 
-from environment.strategies.time_based.prone_cw_tb import ProneCW
+# from environment.strategies.time_based.prone_cw_tb import ProneCW
 
 CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUpPhase]
 
@@ -55,6 +56,8 @@ class SchedulerRGCMPC(BaseSelfRighting):
         # -------------------------------------------------
         self.KP = self.kp * np.eye(12)
         self.KD = self.kd * np.eye(12)
+
+        self.last_qr = None
 
     # -------------------------------------------------
     # Main update entry point
@@ -115,6 +118,21 @@ class SchedulerRGCMPC(BaseSelfRighting):
             # StandUp or future controllers
             self.KP = self.kp * np.eye(12)
             self.KD = self.kd * np.eye(12)
+
+        if self.last_qr is None:
+            self.last_qr = self.robot_states.q.copy()
+
+        delta_qr = self.robot_states.q - self.last_qr
+
+        intent_norm = np.linalg.norm(self.robot_states.qr - self.robot_states.q)
+        solver_motion = np.linalg.norm(self.delta_qr)
+        actual_motion = np.linalg.norm(delta_qr)
+
+        self.last_qr = self.robot_states.q.copy()
+
+        print(
+            f"{mode}, {intent_norm}, {solver_motion}, {actual_motion}, {self.robot_states.lambda_max}, {self.robot_states.primal_res},{self.robot_states.dual_res}"
+        )
 
         # For future debug
         # if mode == 3:

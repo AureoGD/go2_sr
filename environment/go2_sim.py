@@ -245,7 +245,7 @@ class Go2ModelSimMuJoCo():
     def control_loop(self, mode):
         if mode != -1:
             self._task_control(mode)
-            if self.robot_states.critical_mpc_fail:
+            if self.robot_states.mpc_critical_fail:
                 return
 
         for _ in range(int(self.con_dt / self.dyn_dt)):

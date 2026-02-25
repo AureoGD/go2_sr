@@ -16,9 +16,9 @@ import pickle
 
 USE_TRAINED_POLICY = False
 
-RESULTS_DIR = "results/go2_self_righting_CEM_20260105_095825"
+RESULTS_DIR = "results/go2_self_righting_CEM_20260109_175836"
 MODEL_DIR = os.path.join(RESULTS_DIR, "models")
-MODEL_FILE = "best_overall.pth"
+MODEL_FILE = "gen_0600.pth"
 CONFIG_FILE = os.path.join(RESULTS_DIR, "config.json")
 
 DIFFICULTY = 1.0
@@ -62,52 +62,48 @@ def main():
 
         policy.eval()
 
-        if "normalizer_state" in checkpoint:
-            norm_data = checkpoint["normalizer_state"]
+        # if "normalizer_state" in checkpoint:
+        #     norm_data = checkpoint["normalizer_state"]
 
-            if isinstance(norm_data, dict):
-                mean = norm_data.get("mean", None)
-                var = norm_data.get("var", None)
+        #     if isinstance(norm_data, dict):
+        #         mean = norm_data.get("mean", None)
+        #         var = norm_data.get("var", None)
 
-                if mean is None or var is None:
-                    raise RuntimeError(f"Invalid normalizer_state keys: {list(norm_data.keys())}")
+        #         if mean is None or var is None:
+        #             raise RuntimeError(f"Invalid normalizer_state keys: {list(norm_data.keys())}")
 
-                count = norm_data.get("count", 1.0)
+        #         count = norm_data.get("count", 1.0)
 
-                norm_stats = NormalizerStats(
-                    count=float(count),
-                    mean=np.asarray(mean, dtype=np.float64),
-                    var=np.asarray(var, dtype=np.float64),
-                )
-            else:
-                norm_stats = norm_data
+        #         norm_stats = NormalizerStats(
+        #             count=float(count),
+        #             mean=np.asarray(mean, dtype=np.float64),
+        #             var=np.asarray(var, dtype=np.float64),
+        #         )
+        #     else:
+        #         norm_stats = norm_data
 
-            env.normalizer.sync_global_stats(norm_stats)
-            print("[OK] Normalizer loaded.")
-        else:
-            print("[WARNING] No normalizer stats found in checkpoint.")
+        #     env.normalizer.sync_global_stats(norm_stats)
+        #     print("[OK] Normalizer loaded.")
+        # else:
+        #     print("[WARNING] No normalizer stats found in checkpoint.")
 
-        print("\n=== Starting Evaluation Loop (Ctrl+C to stop) ===")
+        # print("\n=== Starting Evaluation Loop (Ctrl+C to stop) ===")
 
     phase_lib = PhaseLibrary()
     phase_spawner = PhaseSpawner(phase_lib)
 
-    scenarios = [phase_spawner.apply() for _ in range(1)]
-
-    qr_states = deque()
-    dq_states = deque()
-    q_states = deque()
-
+    scenarios = [phase_spawner.apply() for _ in range(10)]
     try:
         ep = 0
         for s in scenarios:
             print(f"\n--- Episode {ep + 1} ---")
-            r0 = [np.pi, 0, 0]
-            q0 = [0.0, -0.5, -1.5, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
             # q0, r0, b0, mode = s
-            # obs, info = env.reset(b0=b0, r0=r0, q0=q0, mode=5)
+            # obs, info = env.reset(b0=b0, r0=r0, q0=q0, mode=mode)
+
+            r0 = [np.pi, 0, 0]
+            q0 = [0.7, 1.0, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
             obs, info = env.reset(r0=r0, q0=q0)
-            # print(f"\n--- Mode {mode} ---")
+
             total_reward = 0.0
             tick = 0
 
@@ -120,47 +116,12 @@ def main():
                         action, _ = policy.predict(obs, deterministic=True)
                         action = int(action)
                 else:
-                    if tick < 25:
-                        action = 0
-                    elif tick < 25 + 120:
-                        action = 1
-                    elif tick < 25 + 120 + 310:
-                        action = 2
-                    elif tick < 25 + 120 + 310 + 370:
-                        action = 3
-                    elif tick < 25 + 120 + 310 + 370 + 300:
-                        action = 4
-                    elif tick < 25 + 120 + 310 + 370 + 300 + 210:
-                        action = 5
-                    elif tick < 25 + 120 + 310 + 370 + 300 + 210 + 210:
-                        action = 6
-                    else:
-                        action = 0
-                    # if tick < 20:
-                    #     action = 0
-                    # elif tick < 150:
-                    #     action = 1  # go_safe
-                    # elif tick < 150 + 185:
-                    #     action = 2  # prepare_cw
-                    # elif tick < 150 + 185 + 130:
-                    #     action = 3  # roll_cw
-                    # elif tick < 150 + 185 + 130 + 250:
-                    #     action = 4  # landing_cw
-                    # elif tick < 150 + 185 + 130 + 250 + 270:
-                    #     action = 5  # prone
-                    # elif tick < 150 + 185 + 130 + 250 + 270 + 300:
-                    #     action = 6  # standing_up
-                    # else:
-                    #     action = 0
+                    action = debug_tb(tick=tick)
+                    # action = debg_rgc(tick=tick)
+                    # action = 6
 
                 obs, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
-                q = env.robot_sim.robot_states.q.copy()
-                dq = env.robot_sim.robot_states.dq.copy()
-                qr = env.robot_sim.robot_states.qr.copy()
-                q_states.append(q.flatten())
-                dq_states.append(dq.flatten())
-                qr_states.append(qr.flatten())
 
                 if terminated or truncated:
                     elapsed = time.perf_counter() - start_time
@@ -175,21 +136,54 @@ def main():
 
                 tick += 1
 
-        print("Test")
-        data = {
-            "q": q_states,
-            "dq": dq_states,
-            "qr": qr_states,
-        }
-
-        with open("joint_states_2.pkl", "wb") as f:
-            pickle.dump(data, f)
-
     except KeyboardInterrupt:
         print("\nEvaluation interrupted by user.")
 
     finally:
         env.close()
+
+
+def debug_tb(tick):
+    if tick < 25:
+        action = 0
+    elif tick < 25 + 120:
+        action = 1
+    elif tick < 25 + 120 + 310:
+        action = 2
+    elif tick < 25 + 120 + 310 + 370:
+        action = 3
+    elif tick < 25 + 120 + 310 + 370 + 300:
+        action = 4
+    elif tick < 25 + 120 + 310 + 370 + 300 + 210:
+        action = 5
+    elif tick < 25 + 120 + 310 + 370 + 300 + 210 + 210:
+        action = 6
+    else:
+        action = 0
+
+    return action
+
+
+def debg_rgc(tick):
+
+    if tick < 20:
+        action = 0
+    elif tick < 150:
+        action = 1  # go_safe
+    elif tick < 150 + 250:
+        action = 2  # prepare_cw
+    elif tick < 150 + 250 + 150:
+        action = 3  # roll_cw
+    elif tick < 150 + 250 + 150 + 250:
+        action = 4  # landing_cw
+    elif tick < 150 + 250 + 150 + 250 + 270:
+        action = 5  # prone
+    elif tick < 150 + 250 + 150 + 250 + 270 + 300:
+        action = 6  # standing_up
+    else:
+        action = 0
+
+    return action
 
 
 if __name__ == "__main__":

@@ -145,6 +145,7 @@ class TrainingLogger:
             norm_data = {'mean': norm_stats.mean, 'var': norm_stats.var}
         else:
             norm_data = norm_stats if norm_stats else {}
+            norm_data = None
 
         checkpoint = {
             'generation': gen,

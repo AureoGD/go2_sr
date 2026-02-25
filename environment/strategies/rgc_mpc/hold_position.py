@@ -17,6 +17,6 @@ class HoldPosition(BaseRGC):
         # HOLD is always valid: clear any failure flags
         if self.runtime:
             self.robot_states.mpc_fail = False
-            self.robot_states.critical_mpc_fail = False
+            self.robot_states.mpc_critical_fail = False
 
         return np.zeros(12)

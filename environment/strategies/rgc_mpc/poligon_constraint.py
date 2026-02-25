@@ -69,9 +69,6 @@ class SupportPolygonConstraint:
 
         return np.array(A), np.array(b), vertices
 
-    # --------------------------------------------------
-    # Helpers
-    # --------------------------------------------------
     @staticmethod
     def _is_ccw(vertices):
         area = 0.0

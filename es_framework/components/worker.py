@@ -41,10 +41,10 @@ def run_micro_task(task_args):
     # Configure env
     env.set_difficulty(difficulty)
 
-    if norm_stats is not None:
-        env.normalizer.sync_global_stats(norm_stats)
-    else:
-        env.normalizer.reset_shadow()
+    # if norm_stats is not None:
+    #     env.normalizer.sync_global_stats(norm_stats)
+    # else:
+    #     env.normalizer.reset_shadow()
 
     q0, r0, b0, mode = single_condition
     obs, _ = env.reset(q0=q0, r0=r0, b0=b0, mode=mode)
@@ -66,7 +66,7 @@ def run_micro_task(task_args):
             break
 
     shared_heartbeat[ind_id] = -1.0
-    return ind_id, total_reward, env.normalizer.get_shadow_stats(), -1
+    return ind_id, total_reward, -1
 
 
 # # ============================================================

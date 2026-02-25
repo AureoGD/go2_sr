@@ -43,6 +43,7 @@ class PrepareCW():
             self.tick += 1
 
             self.percent_task = np.clip(spend_time / self.total_time_task, 0, 1)
+            self.robot_states.sr_controller_sucess_percent = self.percent_task
 
             return delta_qr
         return np.zeros(12)

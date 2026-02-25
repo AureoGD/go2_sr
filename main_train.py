@@ -44,13 +44,13 @@ def main():
         "job_name": "go2_self_righting",
         "pop_size": 40,
         "num_scenarios": 5,
-        "max_generations": 500,
+        "max_generations": 1000,
         "max_workers": 20,
         "sigma_init": 0.05,
         "sigma_decay": 0.995,
         "elite_frac": 0.2,
         "model_config": {
-            "hidden_dims": [128, 128],
+            "hidden_dims": [64, 64, 64],
             "activation": "tanh",
             "discrete": True
         }
@@ -177,17 +177,12 @@ def main():
             rewards = {i: [] for i in range(config["pop_size"])}
             worker_stats = []
 
-            for tid, r, stats, _ in results:
+            for tid, r, _ in results:
                 rewards[tid // config["num_scenarios"]].append(r)
-                if stats is not None:
-                    worker_stats.append(stats)
 
             rewards_np = np.array([np.mean(rewards[i]) for i in range(config["pop_size"])])
 
             optimizer.tell(candidates, rewards_np)
-
-            if worker_stats:
-                global_stats = worker_stats[0]
 
             # curriculum.update(success_rate=float(np.mean(rewards_np > 0.0)), optimizer=optimizer)
 
@@ -197,8 +192,7 @@ def main():
                   f"Sigma: {optimizer.sigma:.4f} | "
                   f"Time: {gen_time:5.1f}s")
 
-            logger.log_generation(gen, list(zip(candidates, rewards_np)), optimizer, global_stats,
-                                  {"gen_time": gen_time})
+            logger.log_generation(gen, list(zip(candidates, rewards_np)), optimizer, None, {"gen_time": gen_time})
 
             gen += 1
 

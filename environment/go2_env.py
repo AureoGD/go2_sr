@@ -4,6 +4,7 @@ import psutil
 import os
 from environment.go2_sim import Go2ModelSimMuJoCo
 from environment.normalizer import Go2StateNormalizer
+from environment.normalizer import Go2SelfRightingNormalizer
 from collections import deque
 
 
@@ -25,8 +26,8 @@ class Go2Env(gym.Env):
 
         strategy_name = kwargs.get("strategy", "tb")
         self.robot_sim = Go2ModelSimMuJoCo(render=self.rendering, strategy_name=strategy_name, **kwargs)
-
-        self.n_states = 65
+        self.normalizer = Go2SelfRightingNormalizer()
+        self.n_states = 7
         self.action_space = gym.spaces.Discrete(int(self.robot_sim.task_control.n_controllers))
         self.observation_space = gym.spaces.Box(
             low=-1,
@@ -41,7 +42,7 @@ class Go2Env(gym.Env):
         self.ep = 0
         self.st = np.zeros((self.n_states,), dtype=np.float32)
 
-        self.normalizer = Go2StateNormalizer(box_size=0.75)
+        # self.normalizer = Go2StateNormalizer(box_size=0.75)
 
         self.current_controller_idx = 0
         self.last_controller_idx = 0
@@ -71,7 +72,7 @@ class Go2Env(gym.Env):
         self.WEIGHT_ORIENTATION = 0.01
         self.WEIGHT_MODE_HOLD = 2.5
         self.WEIGHT_END_TASK = 10.0
-        self.WEIGHT_STAGNATION = 0.002
+        self.WEIGHT_STAGNATION = 0.0005
         self.WEIGHT_MPC_FAIL = 1.0
         self.WEIGHT_BAD_ORIENTATION = 1
         self.WEIGHT_IDLE = 0.1
@@ -94,7 +95,10 @@ class Go2Env(gym.Env):
         self.current_step += 1
 
         self.robot_sim.control_loop(self.current_controller_idx)
-        self._norm()
+
+        self.robot_sim.robot_states.sr_current_controller = action
+
+        self.st = self.normalizer.encode(self.robot_sim.robot_states)
 
         reward = self._reward()
         self.ep_reward += reward
@@ -116,22 +120,6 @@ class Go2Env(gym.Env):
             info["terminal_observation"] = self.st.copy()
 
         return self.st, reward, terminated, truncated, info
-
-    def _norm(self):
-        rs = self.robot_sim.robot_states
-        self.st[0:3] = rs.r_pos.reshape(3)
-        self.st[3:6] = rs.r_vel.reshape(3)
-        self.st[6:10] = rs.epsilon.reshape(4)
-        self.st[10:13] = rs.omega.reshape(3)
-        self.st[13:25] = rs.q.reshape(12)
-        self.st[25:37] = rs.dq.reshape(12)
-        self.st[37:49] = rs.qr.reshape(12)
-        self.st[49:61] = (rs.tau_pd + rs.tau_g).reshape(12)
-        self.st[61] = float(self.current_controller_idx)
-        self.st[62] = float(rs.mpc_fail)
-        self.st[63] = float(rs.current_sucess_mode)
-        self.st[64] = float(rs.subtask_succes)
-        self.st = self.normalizer.normalize(self.st)
 
     def reset(self, *, seed=None, q0=None, b0=None, r0=None, mode=None):
         super().reset(seed=seed)
@@ -173,26 +161,26 @@ class Go2Env(gym.Env):
         self.last_ended_controller_idx_mode = -1
 
         rs = self.robot_sim.robot_states
-        rs.critical_mpc_fail = False
+        rs.mpc_critical_fail = False
         rs.subtask_succes = False
         rs.mpc_fail = False
 
-        start_pos = rs.r_pos
-        self.normalizer._norm_pos(start_pos.reshape(3))
-        self.normalizer.reset_reference()
+        self.normalizer.reset(rs)
 
         if mode is not None:
             self.var_mode_conf(mode=mode)
         else:
             rs.sr_mode_completed[:] = [False] * len(rs.sr_mode_completed)
             rs.current_sucess_mode = 0
-        self._norm()
+
+        self.st = self.normalizer.encode(self.robot_sim.robot_states)
 
         return self.st, {"Episode": self.ep, "Episode reward": ep_r}
 
     def _reward(self):
         r = 0.0
         rs = self.robot_sim.robot_states
+        c_alpha = self.st[1]
 
         if self.current_controller_idx != self.last_controller_idx:
             self.joint_stagnation_counter = 0
@@ -211,23 +199,22 @@ class Go2Env(gym.Env):
         if self.current_controller_tick == self.MIN_DWELL_TICKS:
             r += self.WEIGHT_MODE_HOLD
 
-        roll = rs.rpy[0]
-        abs_roll = abs(roll)
         level = self.control_index_to_level[self.current_controller_idx]
+
         if self.last_ended_controller_idx_mode != -1:
             last_level = self.control_index_to_level[self.last_ended_controller_idx_mode]
             if level < last_level:
                 r -= 0.5
 
-        r -= self.WEIGHT_ORIENTATION * (abs_roll / np.pi)
+        r -= self.WEIGHT_ORIENTATION * (1.0 - c_alpha)
 
-        if abs_roll < np.pi * 30 / 180:
+        if c_alpha < np.cos(np.deg2rad(30)):
             r += self.WEIGHT_ORIENTATION
 
-        if abs_roll > np.pi / 2 and self.current_controller_idx in [4, 5, 6]:
+        if c_alpha < 0 and self.current_controller_idx in [4, 5, 6]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
-        if abs_roll < np.pi / 2 and self.current_controller_idx in [1, 2]:
+        if c_alpha > 0 and self.current_controller_idx in [1, 2]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
         if self.current_controller_idx == 0:
@@ -247,29 +234,8 @@ class Go2Env(gym.Env):
             valid = idx[idx > 0]
             rs.current_sucess_mode = float(valid[-1]) if valid.size > 0 else 0.0
 
-        # if rs.subtask_succes and self.last_ended_controller_idx_mode != self.current_controller_idx:
-        #     self.last_ended_controller_idx_mode = self.current_controller_idx
-        #     level = self.control_index_to_level[self.current_controller_idx]
-
-        #     for i in range(level + 1, len(rs.sr_mode_completed)):
-        #         rs.sr_mode_completed[i] = False
-
-        #     rs.sr_mode_completed[level] = True
-
-        #     count = min(self.end_phase_count[self.current_controller_idx], self.MAX_PHASE_COUNT)
-        #     r += self.WEIGHT_END_TASK / (2**count)
-
-        #     decayed_time = self.time_extension / (2**count)
-        #     self.current_step_limit = min(self.current_step_limit + decayed_time, self.max_step_limit)
-
-        #     self.end_phase_count[self.current_controller_idx] += 1
-
-        #     idx = np.where(rs.sr_mode_completed)[0]
-        #     valid = idx[idx > 0]
-        #     rs.current_sucess_mode = float(valid[-1]) if valid.size > 0 else 0.0
-
         stagnation_metric = max(self.joint_stagnation_counter, self.stagnation_counter)
-        if stagnation_metric > 50:
+        if stagnation_metric > 150:
             r -= self.WEIGHT_STAGNATION * stagnation_metric
 
         if rs.mpc_fail:
@@ -277,7 +243,7 @@ class Go2Env(gym.Env):
 
         self.hq.append(rs.q.copy().ravel())
         self.hz.append(float(rs.r_pos[2]))
-        self.hth.append(float(abs_roll))
+        self.hth.append(float(c_alpha))
 
         if len(self.hq) >= self.WINDOW:
             dq_diff = np.diff(np.array(self.hq), axis=0)
@@ -310,18 +276,17 @@ class Go2Env(gym.Env):
 
     def _termination(self):
         rs = self.robot_sim.robot_states
+        c_alpha = self.st[1]
 
-        roll = abs(rs.rpy[0])
-        pitch = abs(rs.rpy[1])
         z = abs(self.bz_initial - rs.b_pos[2])
 
-        physically_upright = (roll < np.pi * 15 / 180 and pitch < np.pi * 15 / 180 and z > self.min_upright_height)
+        physically_upright = c_alpha > np.cos(np.cos(np.deg2rad(10))) and z > self.min_upright_height
 
         sequence_completed = all(rs.sr_mode_completed[1:])
 
         success = physically_upright and sequence_completed
 
-        mpc_crash = rs.critical_mpc_fail
+        mpc_crash = rs.mpc_critical_fail
         too_many_switches = self.total_controller_idx_changes > 50
         stagnated = self.stagnation_counter > 300
         joint_stagnated = self.joint_stagnation_counter > 300

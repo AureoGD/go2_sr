@@ -240,3 +240,68 @@ class Go2StateNormalizer:
     def reset_reference(self):
         self.current_center = None
         self.is_out_of_box = False
+
+
+class Go2SelfRightingNormalizer:
+    """
+    Task-specific observation encoder for self-righting phase detection.
+
+    Output observation:
+    [ sin(alpha), cos(alpha), Δx, Δy, controller_id, controller_progress ]
+    """
+
+    def __init__(self):
+        self.com_ref_xy = None  # Reference CoM position (world frame)
+
+    def reset(self, robot_states):
+        """
+        Call once at episode reset.
+        Sets the reference CoM position.
+        """
+        com = robot_states.b_pos.flatten()  # world frame CoM
+        self.com_ref_xy = com[0:2].copy()
+
+    def encode(self, robot_states):
+        """
+        Build NN observation from robot_states.
+        """
+
+        # -------------------------------------------------
+        # 1. Gravity alignment (sinα, cosα)
+        # -------------------------------------------------
+        qx, qy, qz, qw = robot_states.epsilon.flatten()
+
+        # Rotation matrix (body -> world)
+        R = np.array([[1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+                      [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+                      [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)]])
+
+        # Gravity direction (unit vector)
+        g_world = np.array([0.0, 0.0, -1.0])
+        g_body = R.T @ g_world
+
+        gy, gz = g_body[1], g_body[2]
+        norm_yz = np.sqrt(gy * gy + gz * gz) + 1e-8
+
+        sin_alpha = -gy / norm_yz
+        cos_alpha = -gz / norm_yz
+
+        # -------------------------------------------------
+        # 2. CoM displacement in world frame (dx, dy)
+        # -------------------------------------------------
+        com = robot_states.b_pos.flatten()
+
+        if self.com_ref_xy is None:
+            self.com_ref_xy = com[0:2].copy()
+
+        delta_xy = com[0:2] - self.com_ref_xy
+        dx, dy = delta_xy
+
+        controller_id = float(robot_states.sr_current_controller) / 6
+        controller_progress = float(robot_states.sr_controller_sucess_percent)
+        self_righting_progress = robot_states.current_sucess_mode / 6
+
+        obs = np.array([sin_alpha, cos_alpha, dx, dy, controller_id, controller_progress, self_righting_progress],
+                       dtype=np.float32)
+
+        return obs

@@ -4,7 +4,7 @@ from environment.strategies.base_self_righting import BaseSelfRighting
 # -------------------------------------------------
 # Import controllers
 # -------------------------------------------------
-from environment.strategies.rgc_mpc.hold_position import HoldPosition
+from environment.strategies.time_based.hold_position import HoldPosition
 from environment.strategies.time_based.go_safe_tb import GoSafe
 from environment.strategies.time_based.prepare_cw_tb import PrepareCW
 from environment.strategies.time_based.roll_cw_tb import RollCW

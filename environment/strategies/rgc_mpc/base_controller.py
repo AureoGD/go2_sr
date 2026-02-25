@@ -206,6 +206,14 @@ class BaseRGC:
                 # --- Solve ---
                 res = self.prob.solve()
 
+                lambda_max = np.max(np.abs(res.y))
+
+                self.robot_states.lambda_max = lambda_max
+                self.robot_states.primal_res = res.info.prim_res
+                self.robot_states.dual_res = res.info.dual_res
+
+                # solver_health = np.maximum(primal_scaled, dual_scaled)
+
                 if res.info.status != "solved":
                     # Solver Failure (not critical, just sub-optimal)
                     return self._handle_mpc_failure(critical=False)
@@ -224,7 +232,7 @@ class BaseRGC:
         - critical=False means solver couldn't find optimal solution (maybe continue?)
         """
         self.robot_states.mpc_fail = True
-        self.robot_states.critical_mpc_fail = critical
+        self.robot_states.mpc_critical_fail = critical
         self.dqr = np.zeros((self.nu,), dtype=np.float32)
         return self.dqr
 
@@ -242,7 +250,7 @@ class BaseRGC:
 
         self.robot_states.mpc_obj_val = res.info.obj_val
         self.robot_states.mpc_fail = False
-        self.robot_states.critical_mpc_fail = False
+        self.robot_states.mpc_critical_fail = False
 
         return self.dqr
 
