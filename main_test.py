@@ -116,8 +116,8 @@ def main():
                         action, _ = policy.predict(obs, deterministic=True)
                         action = int(action)
                 else:
-                    action = debug_tb(tick=tick)
-                    # action = debg_rgc(tick=tick)
+                    # action = debug_tb(tick=tick)
+                    action = debg_rgc(tick=tick)
                     # action = 6
 
                 obs, reward, terminated, truncated, info = env.step(action)
@@ -146,17 +146,17 @@ def main():
 def debug_tb(tick):
     if tick < 25:
         action = 0
-    elif tick < 25 + 120:
+    elif tick < 25 + 80:
         action = 1
-    elif tick < 25 + 120 + 310:
+    elif tick < 25 + 80 + 310:
         action = 2
-    elif tick < 25 + 120 + 310 + 370:
+    elif tick < 25 + 80 + 310 + 370:
         action = 3
-    elif tick < 25 + 120 + 310 + 370 + 300:
+    elif tick < 25 + 80 + 310 + 370 + 300:
         action = 4
-    elif tick < 25 + 120 + 310 + 370 + 300 + 210:
+    elif tick < 25 + 80 + 310 + 370 + 300 + 210:
         action = 5
-    elif tick < 25 + 120 + 310 + 370 + 300 + 210 + 210:
+    elif tick < 25 + 80 + 310 + 370 + 300 + 210 + 210:
         action = 6
     else:
         action = 0

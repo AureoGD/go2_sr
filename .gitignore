@@ -3,3 +3,5 @@ logs
 models
 results
 vizenv
+tpe/vizenv
+tpe/data

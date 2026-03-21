@@ -152,6 +152,8 @@ class BaseRGC:
         self.qr_l = qr_l.reshape(12, 1)
         self.qr_u = qr_u.reshape(12, 1)
 
+        self.last_r = None
+
         self.center_optimizer = ChebyshevCenterSolver()
 
     def _update_detector(self):
@@ -384,14 +386,24 @@ class BaseRGC:
 
     def com_quatities(self):
         q, dq = self.ordering_joints()
-        pin.ccrba(self.model, self.data, q, dq)
+        pin.centerOfMass(self.model, self.data, q, dq)
 
-        r = self.data.com[0]
-        dr = self.data.vcom[0]
+        self.robot_states.r_por = self.data.com[0]
+        self.robot_states.r_vel = self.data.vcom[0]
 
-        # Save states
-        self.robot_states.r_vel = dr.reshape(3, 1)
-        self.robot_states.r_pos = r.reshape(3, 1)
+        # pin.ccrba(self.model, self.data, q, dq)
+
+        # r = self.data.com[0]
+        # dr = self.data.vcom[0]
+        # if self.last_r is None:
+        #     dr = np.zeros((3, 1))
+        #     self.last_r = r.copy()
+        # else:
+        #     dr = (r - self.last_r) / 0.001
+        #     self.last_r = r.copy()
+        # # Save states
+        # self.robot_states.r_vel = dr.reshape(3, 1)
+        # self.robot_states.r_pos = r.reshape(3, 1)
 
     def reset_controller(self):
         if self.task_finish_detect is not None:

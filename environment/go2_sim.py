@@ -109,7 +109,9 @@ class Go2ModelSimMuJoCo():
             'foot_ids': self.foot_ids,
             'kp': self.kp,
             'kd': self.kd,
-            'robot_states': self.robot_states
+            'robot_states': self.robot_states,
+            'seed': 44,
+            'stochastic': True
         }
 
         self.base_rgc = BaseRGC(**config)
@@ -229,6 +231,7 @@ class Go2ModelSimMuJoCo():
         self.robot_states.q = self.q.reshape(12, 1)
         self.robot_states.dq = self.dq.reshape(12, 1)
         self.robot_states.b_pos = self.data.qpos[0:3].reshape(3, 1)
+        self.robot_states.b_vel = self.data.qvel[0:3].reshape(3, 1)
         self.robot_states.epsilon = np.array(
             (self.data.qpos[4], self.data.qpos[5], self.data.qpos[6], self.data.qpos[3])).reshape(4, 1)
         self.robot_states.omega = self.data.qvel[3:6].reshape(3, 1)
@@ -254,6 +257,8 @@ class Go2ModelSimMuJoCo():
 
         if self._is_render and self.viewer:
             # self.debug_viwer()
+            base_pos = self.robot_states.b_pos.reshape(3)
+            self.viewer.cam.lookat[:] = base_pos
             self.viewer.sync()
             time.sleep(self.con_dt)
 
@@ -361,11 +366,10 @@ class Go2ModelSimMuJoCo():
         # Forward kinematics
         mujoco.mj_forward(self.model, self.data)
 
-        # Let contacts settle (YOUR logic)
+        # Let contacts settle
         render_aux = self._is_render
         self._is_render = False
         for _ in range(100):
-            # self._physics(tau=np.zeros(12))
             self.control_loop(-1)
         self._is_render = render_aux
 

@@ -24,7 +24,7 @@ class Go2Env(gym.Env):
         self.current_step_limit = 300
         self.time_extension = 350
 
-        strategy_name = kwargs.get("strategy", "tb")
+        strategy_name = kwargs.get("strategy", "rgc")
         self.robot_sim = Go2ModelSimMuJoCo(render=self.rendering, strategy_name=strategy_name, **kwargs)
         self.normalizer = Go2SelfRightingNormalizer()
         self.n_states = 7

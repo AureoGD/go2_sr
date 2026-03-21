@@ -6,4 +6,5 @@
     "python.linting.pylintEnabled": true,
     "debug.console.maxTokenizationLineLength": 10000,
     "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "python-envs.defaultEnvManager": "ms-python.python:system",
 }
