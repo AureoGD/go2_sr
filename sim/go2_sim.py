@@ -1,336 +1,221 @@
-import os
-import time
 import numpy as np
 import mujoco
-import mujoco.viewer
-import math
 import pinocchio as pin
-from environment.robot_states import RobotStates
-from scipy.spatial.transform import Rotation
-from environment.strategies.unitree_self_righting import UnitreeSelfRighting
-from environment.strategies.scheduler_rgc_mpc import SchedulerRGCMPC
-from environment.strategies.scheduler_tb import SchedulerTB
-from environment.strategies.rgc_mpc.base_controller import BaseRGC
-import itertools
-import signal
 
-# ============================================================
-# NUMERICAL SAFETY (NO LOGIC CHANGE)
-# ============================================================
-np.seterr(all="raise")
-np.set_printoptions(linewidth=1000, precision=3)
+from sim.state import SystemState
+from sim.engine.pinocchio_engine import PinocchioEngine
+from sim.utils.transforms import euler_to_quat, quat_to_euler
 
 
-class Go2ModelSimMuJoCo():
+class Go2Sim:
 
-    def __init__(self, task_control=None, render=False, strategy_name='unitree', **kwargs):
-        self._closed = False
-        self._is_render = render
-        self.pin_model = None
-        self.pin_data = None
-        self.geo_data = None
-        self.geo_model = None
-        self.task_control = task_control
+    # ======================================================
+    # INIT
+    # ======================================================
+    def __init__(self, urdf_path, mj_model, mj_data, controller=None, con_dt=0.01, dyn_dt=0.001, viewer=None):
 
-        self.links_ids = []
-        self.foot_ids = []
-        self.joint_idx_list = []
+        # -------------------------------
+        # MuJoCo
+        # -------------------------------
+        self.mj_model = mj_model
+        self.mj_data = mj_data
 
-        self.legs = ['FR', 'FL', 'RR', 'RL']
-        self.links = ['hip', 'thigh', 'calf']
+        # -------------------------------
+        # STATE
+        # -------------------------------
+        self.state = SystemState()
+        self.robot_state = self.state.robot
+        self.controller_state = self.state.controller
 
-        self.dyn_dt = 0.001
-        self.con_dt = 0.01
+        # -------------------------------
+        # PINOCCHIO
+        # -------------------------------
+        root_joint = pin.JointModelFreeFlyer()
+        self.pin_model = pin.buildModelFromUrdf(urdf_path, root_joint)
+        self.pin_engine = PinocchioEngine(self.pin_model)
 
-        # ====================================================
-        # LOAD MUJOCO MODEL (UNCHANGED)
-        # ====================================================
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        model_path = os.path.join(current_dir, "assets/unitree_go2/scene.xml")
+        # -------------------------------
+        # CONTROLLER
+        # -------------------------------
+        self.controller = controller
 
-        self.model = mujoco.MjModel.from_xml_path(model_path)
-        self.data = mujoco.MjData(self.model)
-        self.model.opt.cone = mujoco.mjtCone.mjCONE_PYRAMIDAL
+        # -------------------------------
+        # TIMING
+        # -------------------------------
+        self.con_dt = con_dt
+        self.dyn_dt = dyn_dt
+        self.n_substeps = int(self.con_dt / self.dyn_dt)
 
-        # ====================================================
-        # LOAD PINOCCHIO MODEL (UNCHANGED)
-        # ====================================================
-        urdf_path = os.path.join(current_dir, "assets/unitree_go2/go2.urdf")
-        if os.path.exists(urdf_path):
-            root_joint = pin.JointModelFreeFlyer()
-            self.pin_model = pin.buildModelFromUrdf(urdf_path, root_joint)
-            self.pin_data = self.pin_model.createData()
-        else:
-            self.geom_data = None
+        # -------------------------------
+        # LOW-LEVEL GAINS
+        # -------------------------------
+        self.KP = np.eye(12) * 50.0
+        self.KD = np.eye(12) * 2.0
 
-        # ====================================================
-        # ORIGINAL JOINT MAPPING (UNCHANGED)
-        # ====================================================
-        self._setup_joint_mapping()
+        # ------------------------------
+        # JOINT LIMITS
+        # ------------------------------
+        self.joint_limits = np.array([
+            [-1.0472, 1.0472],
+            [-1.5708, 3.4907],
+            [-2.7227, -0.83776],
+            [-1.0472, 1.0472],
+            [-1.5708, 3.4907],
+            [-2.7227, -0.83776],
+            [-1.0472, 1.0472],
+            [-0.5236, 4.5379],
+            [-2.7227, -0.83776],
+            [-1.0472, 1.0472],
+            [-0.5236, 4.5379],
+            [-2.7227, -0.83776],
+        ])
 
-        self.model.opt.timestep = self.dyn_dt
+        # ------------------------------
+        # TORQUE LIMITS
+        # ------------------------------
+        torque_leg = np.array([23.7, 23.7, 45.43])
+        self.torque_limits = np.tile(torque_leg, 4)
 
-        self.viewer = None
-        if self._is_render:
-            self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+        # -------------------------------
+        # VIEWER
+        # -------------------------------
+        self.viewer = viewer
+        self._is_render = viewer is not None
 
-        # ====================================================
-        # CONTROL GAINS (UNCHANGED)
-        # ====================================================
-        self.kp = 50
-        self.kd = 2.5
-        self.KP = self.kp * np.eye(12)
-        self.KD = self.kd * np.eye(12)
+        # -------------------------------
+        # INTERNAL
+        # -------------------------------
+        self.iterations = 0
 
-        # ====================================================
-        # STATE VARIABLES (UNCHANGED)
-        # ====================================================
-        self.q = np.zeros(12)
-        self.qr = np.zeros(12)
-        self.dq = np.zeros(12)
-        self.dqr = np.zeros(12)
-        self.delta_qr = np.zeros(12)
-
-        self.tau_max = np.array([23.7, 23.7, 45.43, 23.7, 23.7, 45.43, 23.7, 23.7, 45.43, 23.7, 23.7, 45.43])
-
-        self.robot_states = RobotStates()
-
-        # ====================================================
-        # STRATEGY INIT (UNCHANGED)
-        # ====================================================
-        config = {
-            'model': self.pin_model,
-            'data': self.pin_data,
-            'geo_model': self.geo_model,
-            'geo_data': self.geo_data,
-            'links': self.links,
-            'legs': self.legs,
-            'links_ids': self.links_ids,
-            'foot_ids': self.foot_ids,
-            'kp': self.kp,
-            'kd': self.kd,
-            'robot_states': self.robot_states,
-            'seed': 44,
-            'stochastic': True
-        }
-
-        self.base_rgc = BaseRGC(**config)
-
-        if self.task_control is None:
-            if strategy_name == 'rgc':
-                self.task_control = SchedulerRGCMPC(**config)
-            elif strategy_name == 'tb':
-                self.task_control = SchedulerTB(**config)
-            else:
-                self.task_control = UnitreeSelfRighting(**config)
-
-        self._update_robot_sim_states()
-
-    # ========================================================
-    # SAFETY HELPERS
-    # ========================================================
-    def _assert_finite(self, name, x):
-        if not np.all(np.isfinite(x)):
-            raise FloatingPointError(f"[NaN/Inf DETECTED] {name}: {x}")
-
-    # ========================================================
-    # JOINT MAPPING (ORIGINAL — UNTOUCHED)
-    # ========================================================
-    def _setup_joint_mapping(self):
-        self.joint_names = []
-        self.actuator_names = []
-
-        for leg in self.legs:
-            for link in self.links:
-                self.joint_names.append(f"{leg}_{link}_joint")
-                self.actuator_names.append(f"{leg}_{link}")
-
-        self.joint_idx_list = []
-        self.joint_qpos_addr = []
-
-        for name in self.joint_names:
-            joint_id = self.model.joint(name).id
-            self.joint_idx_list.append(joint_id)
-            self.joint_qpos_addr.append(self.model.jnt_qposadr[joint_id])
-
-        self.actuator_idx_list = []
-        for name in self.actuator_names:
-            self.actuator_idx_list.append(self.model.actuator(name).id)
-
-        if self.pin_model is not None:
-            for leg in self.legs:
-                for l_name in self.links:
-                    try:
-                        self.links_ids.append(self.pin_model.getFrameId(f'{leg}_{l_name}'))
-                    except:
-                        pass
-                try:
-                    self.foot_ids.append(self.pin_model.getFrameId(f'{leg}_foot'))
-                except:
-                    pass
-
-    # ========================================================
-    # PHYSICS STEP (INSTRUMENTED)
-    # ========================================================
-    def _physics(self, tau):
-        self._assert_finite("tau", tau)
-        self._assert_finite("qpos(before)", self.data.qpos)
-        self._assert_finite("qvel(before)", self.data.qvel)
-
-        for i, actuator_idx in enumerate(self.actuator_idx_list):
-            self.data.ctrl[actuator_idx] = tau[i]
-
-        mujoco.mj_step(self.model, self.data)
-
-        self._assert_finite("qpos(after)", self.data.qpos)
-        self._assert_finite("qvel(after)", self.data.qvel)
-
-    # ========================================================
-    # LOW-LEVEL CONTROL (INSTRUMENTED)
-    # ========================================================
-    def _low_level_control(self):
-        self._update_robot_sim_states()
-
-        self._assert_finite("q", self.q)
-        self._assert_finite("dq", self.dq)
-        self._assert_finite("qr", self.qr)
-
-        tau = self.KP @ (self.qr - self.q) + self.KD @ (self.dqr - self.dq)
-        self._assert_finite("tau_pd", tau)
-
-        self.robot_states.tau_pd = tau.reshape(12, 1)
-
-        tau_g = self._comp_tau_g() if self.pin_model is not None else np.zeros(12)
-        self._assert_finite("tau_g", tau_g)
-
-        return np.clip(tau + tau_g, -self.tau_max, self.tau_max)
-
-    # ========================================================
-    # GRAVITY (INSTRUMENTED)
-    # ========================================================
-    def _comp_tau_g(self):
-        q_full = np.vstack((self.robot_states.b_pos, self.robot_states.epsilon, self.robot_states.q[3:6],
-                            self.robot_states.q[0:3], self.robot_states.q[9:12], self.robot_states.q[6:9]))
-
-        tau_g = pin.computeGeneralizedGravity(self.pin_model, self.pin_data, q_full)[6:]
-        self._assert_finite("pin.tau_g", tau_g)
-
-        tau_g = np.vstack((tau_g[3:6], tau_g[0:3], tau_g[9:12], tau_g[6:9])).reshape(12)
-        self.robot_states.tau_g = tau_g.reshape(12, 1)
-        return tau_g
-
-    # ========================================================
-    # STATE UPDATE (INSTRUMENTED)
-    # ========================================================
-    def _update_robot_sim_states(self):
-        for i, qpos_addr in enumerate(self.joint_qpos_addr):
-            self.q[i] = self.data.qpos[qpos_addr]
-            qvel_addr = self.model.jnt_dofadr[self.joint_idx_list[i]]
-            self.dq[i] = self.data.qvel[qvel_addr]
-
-        self.robot_states.q = self.q.reshape(12, 1)
-        self.robot_states.dq = self.dq.reshape(12, 1)
-        self.robot_states.b_pos = self.data.qpos[0:3].reshape(3, 1)
-        self.robot_states.b_vel = self.data.qvel[0:3].reshape(3, 1)
-        self.robot_states.epsilon = np.array(
-            (self.data.qpos[4], self.data.qpos[5], self.data.qpos[6], self.data.qpos[3])).reshape(4, 1)
-        self.robot_states.omega = self.data.qvel[3:6].reshape(3, 1)
-        self.robot_states.rpy = self._quat_to_euler(self.robot_states.epsilon).reshape(3, 1)
-
-        self._assert_finite("robot_states.q", self.robot_states.q)
-        self._assert_finite("robot_states.dq", self.robot_states.dq)
-
-        self.base_rgc.com_quatities()
-
-    # ========================================================
+    # ======================================================
     # MAIN LOOP
-    # ========================================================
-    def control_loop(self, mode):
-        if mode != -1:
-            self._task_control(mode)
-            if self.robot_states.mpc_critical_fail:
-                return
+    # ======================================================
+    def simulation_loop(self, action):
 
-        for _ in range(int(self.con_dt / self.dyn_dt)):
+        # --------------------------------------
+        # 1. Atualizar estado
+        # --------------------------------------
+        self._update_robot_state_from_mujoco()
+
+        self.pin_engine.update(self.robot_state)
+        self._com_quantities()
+
+        # --------------------------------------
+        # 2. HIGH-LEVEL CONTROLLER (100 Hz)
+        # --------------------------------------
+        if self.controller is not None:
+            self.controller.before_step(self.state, action)
+
+        # --------------------------------------
+        # 3. LOW-LEVEL LOOP (1 kHz)
+        # --------------------------------------
+        for _ in range(self.n_substeps):
+
             tau = self._low_level_control()
+
             self._physics(tau)
 
-        if self._is_render and self.viewer:
-            # self.debug_viwer()
-            base_pos = self.robot_states.b_pos.reshape(3)
-            self.viewer.cam.lookat[:] = base_pos
-            self.viewer.sync()
-            time.sleep(self.con_dt)
+            self._update_robot_state_from_mujoco()
 
-    def debug_viwer(self):
-        self.viewer.user_scn.ngeom = 0
-        geom_id = self.viewer.user_scn.ngeom
-        self.viewer.user_scn.ngeom += 1
-        x, y, z = self.robot_states.pc_debug[0, :]
-        mujoco.mjv_initGeom(
-            self.viewer.user_scn.geoms[geom_id],
-            type=mujoco.mjtGeom.mjGEOM_SPHERE,
-            size=[0.01, 0.01, 0.01],  # Radius
-            pos=[x, y, z],
-            mat=np.eye(3).flatten(),
-            rgba=[1, 0, 0, 1])
-        geom_id = self.viewer.user_scn.ngeom
-        self.viewer.user_scn.ngeom += 1
-        x, y, z = self.robot_states.pc_debug[1, :]
-        mujoco.mjv_initGeom(
-            self.viewer.user_scn.geoms[geom_id],
-            type=mujoco.mjtGeom.mjGEOM_SPHERE,
-            size=[0.01, 0.01, 0.01],  # Radius
-            pos=[x, y, z],
-            mat=np.eye(3).flatten(),
-            rgba=[0, 0, 1, 1])
-        geom_id = self.viewer.user_scn.ngeom
-        self.viewer.user_scn.ngeom += 1
-        x, y, z = self.robot_states.pc_debug[2, :]
-        mujoco.mjv_initGeom(
-            self.viewer.user_scn.geoms[geom_id],
-            type=mujoco.mjtGeom.mjGEOM_SPHERE,
-            size=[0.01, 0.01, 0.01],  # Radius
-            pos=[x, y, z],
-            mat=np.eye(3).flatten(),
-            rgba=[0, 1, 1, 1])
+            self.pin_engine.update(self.robot_state)
 
-        geom_id = self.viewer.user_scn.ngeom
-        self.viewer.user_scn.ngeom += 1
+            self._com_quantities()
 
-        base_id = self.pin_model.getFrameId("base_link")
+        # --------------------------------------
+        # 4. AFTER STEP
+        # --------------------------------------
+        if self.controller is not None:
 
-        p_base = np.asarray(self.robot_states.b_pos).reshape(3)
-        R_base = np.asarray(self.pin_data.oMf[base_id].rotation).reshape(3, 3)
+            self.controller.after_step(self.state)
 
-        offset_base = np.array([0.0, 0.0, 0.06755])
-        plane_pos = p_base + R_base @ offset_base
-        R_b_plane = self.roty(-5)
-        plane_R = R_base @ R_b_plane
+        # --------------------------------------
+        # 5. RENDER
+        # --------------------------------------
+        if self._is_render:
+            self._render()
 
-        mujoco.mjv_initGeom(self.viewer.user_scn.geoms[geom_id],
-                            type=mujoco.mjtGeom.mjGEOM_PLANE,
-                            size=np.array([0.5, 0.5, 0.01], dtype=np.float64),
-                            pos=np.array(plane_pos, dtype=np.float64),
-                            mat=np.array(plane_R.flatten(), dtype=np.float64),
-                            rgba=np.array([0.0, 1.0, 1.0, 0.4], dtype=np.float32))
+        self.iterations += 1
 
-    def roty(self, theta):
-        theta = np.pi * theta / 180
-        c, s = np.cos(theta), np.sin(theta)
-        return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+    # ======================================================
+    # CoM quantities
+    # ======================================================
+    def _com_quantities(self):
+        self.robot_state.r_pos = self.pin_engine.com()
+        self.robot_state.r_vel = self.pin_engine.vcom()
 
-    # ========================================================
-    # TASK CONTROL (UNCHANGED)
-    # ========================================================
-    def _task_control(self, mode):
-        self.qr += self.delta_qr
-        self.robot_states.qr = self.qr.reshape(12, 1)
-        self.delta_qr, self.KP, self.KD = self.task_control.update(mode)
+    # ======================================================
+    # LOW-LEVEL CONTROL (PD + gravity)
+    # ======================================================
+    def _low_level_control(self):
 
+        q = self.robot_state.q
+        dq = self.robot_state.dq
+        qr = self.robot_state.qr
+
+        KP = self.controller_state.Kp
+        KD = self.controller_state.Kd
+
+        q_error = qr - q
+        dq_error = -dq
+
+        tau_pd = KP * q_error + KD * dq_error
+        tau_g = self.pin_engine.gravity()
+
+        tau = tau_pd + tau_g
+        self.controller_state.tau_pd = tau_pd
+        self.controller_state.tau_g = tau_g
+        self.controller_state.tau = tau
+
+        return np.clip(tau_pd + tau_g, -self.torque_limits, self.torque_limits)
+
+    # ======================================================
+    # PHYSICS
+    # ======================================================
+    def _physics(self, tau):
+        self.mj_data.ctrl[:] = tau
+        mujoco.mj_step(self.mj_model, self.mj_data)
+
+    # ======================================================
+    # UPDATE STATE FROM MUJOCO
+    # ======================================================
+    def _update_robot_state_from_mujoco(self):
+
+        # base
+        self.robot_state.b_pos = self.mj_data.qpos[0:3].copy()
+
+        # MuJoCo (wxyz) → Pinocchio (xyzw)
+        quat_wxyz = self.mj_data.qpos[3:7]
+        quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
+        self.robot_state.epsilon = quat_xyzw
+
+        self.robot_state.rpy = quat_to_euler(quat=quat_xyzw, order='xyzw')
+
+        # joints (Unitree order)
+        self.robot_state.q = self.mj_data.qpos[7:].copy()
+
+        # velocities
+        self.robot_state.b_vel = self.mj_data.qvel[0:3].copy()
+        self.robot_state.omega = self.mj_data.qvel[3:6].copy()
+        self.robot_state.dq = self.mj_data.qvel[6:].copy()
+
+    # ======================================================
+    # RENDER
+    # ======================================================
+    def _render(self):
+
+        if self.viewer is None:
+            return
+
+        base_pos = self.robot_state.b_pos
+        self.viewer.cam.lookat[:] = base_pos
+        self.viewer.sync()
+
+    # ======================================================
+    # RESET ROBOT POSE (COM SETTLING)
+    # ======================================================
     def reset_robot_pose(self, q0=None, b0=None, r0=None):
-        """Reset robot to initial pose (ORIGINAL LOGIC)"""
-        self.robot_states.pc_debug[:, :] = 0
+
+        self.controller_state.pc_debug[:, :] = 0
 
         if q0 is None:
             q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
@@ -341,95 +226,51 @@ class Go2ModelSimMuJoCo():
         if r0 is None:
             r0 = [np.pi, 0, 0]
 
-        # --- OPTIONAL SAFETY CHECKS (DO NOT CHANGE STATE) ---
-        # Uncomment if you want early failure on bad resets
-        self._assert_finite("reset.q0", np.array(q0))
-        self._assert_finite("reset.b0", np.array(b0))
-        self._assert_finite("reset.r0", np.array(r0))
+        q0 = np.array(q0)
+        b0 = np.array(b0)
+        r0 = np.array(r0)
 
-        # Base position
-        self.data.qpos[0:3] = b0
+        self.mj_data.qpos[0:3] = b0
 
-        # Base orientation (YOUR quaternion convention)
-        quat = self._euler_to_quat(r0)
-        self.data.qpos[3:7] = quat
+        quat_xyzw = euler_to_quat(r0, 'xyzw')
 
-        # Joint positions (YOUR mapping)
-        for i, qpos_addr in enumerate(self.joint_qpos_addr):
-            if qpos_addr != -1 and qpos_addr < self.model.nq:
-                self.data.qpos[qpos_addr] = q0[i]
+        quat_wxyz = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])
 
-        # Zero velocities
-        self.data.qvel[:] = 0.0
-        self.qr = np.array(q0).reshape(12)
+        self.mj_data.qpos[3:7] = quat_wxyz
 
-        # Forward kinematics
-        mujoco.mj_forward(self.model, self.data)
+        self.mj_data.qpos[7:] = q0
 
-        # Let contacts settle
+        self.mj_data.qvel[:] = 0.0
+
+        self.robot_state.qr = q0.copy()
+
+        mujoco.mj_forward(self.mj_model, self.mj_data)
+
         render_aux = self._is_render
         self._is_render = False
+
+        self._update_robot_state_from_mujoco()
+
+        self.pin_engine.update(self.robot_state)
+
         for _ in range(100):
-            self.control_loop(-1)
+
+            tau = self._low_level_control()
+
+            self._physics(tau)
+
+            self._update_robot_state_from_mujoco()
+
+            self.pin_engine.update(self.robot_state)
+
         self._is_render = render_aux
 
-        self._update_robot_sim_states()
+        self._update_robot_state_from_mujoco()
+
+        self.pin_engine.update(self.robot_state)
+
+        if self.controller is not None:
+            if hasattr(self.controller, "reset"):
+                self.controller.reset()
+
         self.iterations = 0
-
-    def _euler_to_quat(self, euler):
-        """Convert Euler angles to quaternion in MuJoCo's [w, x, y, z] order"""
-        r = Rotation.from_euler('xyz', euler)
-        quat_xyzw = r.as_quat()
-        quat_wxyz = [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]]
-        return quat_wxyz
-
-    def _quat_to_euler(self, q):
-        """
-        Converts a quaternion [x, y, z, w] to RPY [roll, pitch, yaw].
-        """
-        x, y, z, w = q
-
-        # Roll (x-axis rotation)
-        sinr_cosp = 2 * (w * x + y * z)
-        cosr_cosp = 1 - 2 * (x * x + y * y)
-        roll = np.arctan2(sinr_cosp, cosr_cosp)
-
-        # Pitch (y-axis rotation)
-        sinp = 2 * (w * y - z * x)
-        if abs(sinp) >= 1:
-            pitch = np.sign(sinp) * np.pi / 2  # Gimbal lock fallback
-        else:
-            pitch = np.arcsin(sinp)
-
-        # Yaw (z-axis rotation)
-        siny_cosp = 2 * (w * z + x * y)
-        cosy_cosp = 1 - 2 * (y * y + z * z)
-        yaw = np.arctan2(siny_cosp, cosy_cosp)
-
-        return np.array([roll, pitch, yaw])
-
-    # ========================================================
-    # RESET / CLOSE (UNCHANGED)
-    # ========================================================
-    def close(self):
-        if getattr(self, "_closed", False):
-            return
-        self._closed = True
-
-        # Viewer first
-        if self.viewer is not None:
-            try:
-                self.viewer.close()
-            except Exception:
-                pass
-            self.viewer = None
-
-        # Explicitly drop MuJoCo references
-        self.data = None
-        self.model = None
-
-        # Drop Pinocchio references
-        self.pin_data = None
-        self.pin_model = None
-        self.geo_model = None
-        self.geom_data = None
