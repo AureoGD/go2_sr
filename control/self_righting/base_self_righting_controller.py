@@ -35,13 +35,12 @@ class BaseSelfRighting(BaseController):
     # ======================================================
     def before_step(self, state, action):
 
-        rs = state.robot
-        cs = state.controller
+        cs = state.low_level
 
         # --------------------------------------
         # 1. APPLY PREVIOUS DELTA (MEMORY)
         # --------------------------------------
-        rs.qr = rs.qr + self.dqr
+        cs.qr = cs.qr + self.dqr
 
         # --------------------------------------
         # 2. COMPUTE NEW DELTA
@@ -51,7 +50,7 @@ class BaseSelfRighting(BaseController):
         # --------------------------------------
         # 3. WRITE BACK
         # --------------------------------------
-        rs.dqr = self.dqr
+        cs.dqr = self.dqr
         cs.Kp = Kp
         cs.Kd = Kd
 

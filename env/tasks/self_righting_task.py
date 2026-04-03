@@ -13,7 +13,7 @@ class SelfRightingTask(BaseTask):
 
         self.obs_dim = self.tpe.probs_dim + 43
 
-        self.n_sr_semantics = 6
+        self.n_action_group = 6
         self.min_upright_height = 0.1
 
         self.MIN_DWELL_TICKS = 100
@@ -47,7 +47,8 @@ class SelfRightingTask(BaseTask):
         self.state_copy = state
 
         rs = self.state_copy.robot
-        cs = self.state_copy.controller
+        cs = self.state_copy.low_level
+        ts = self.state_copy.task_state
 
         dir_v, v_abs = self.normalizer.normalize_velocity(rs.r_vel)
 
@@ -57,7 +58,7 @@ class SelfRightingTask(BaseTask):
 
         q_norm = self.normalizer.normalize_q(rs.q)
 
-        qr_norm = self.normalizer.normalize_q(rs.qr)
+        qr_norm = self.normalizer.normalize_q(cs.qr)
 
         dq_norm = self.normalizer.compute_dq_norm(rs.dq)
 
@@ -65,11 +66,11 @@ class SelfRightingTask(BaseTask):
 
         tau = self.normalizer.normalize_tau(cs.tau)
 
-        controll_index_norm = np.array([cs.controller_index / self.normalizer.n_actions])
+        controll_index_norm = np.array([ts.controller_index / self.normalizer.n_actions])
 
-        n_sr_semantics_norm = np.array([cs.sr_semantics / self.n_sr_semantics])
+        action_group_norm = np.array([ts.action_group / self.n_action_group])
 
-        controller_evolution = np.array([cs.controller_evolution])
+        controller_evolution = np.array([ts.controller_evolution])
 
         self._features = {
             "dir_v": dir_v,
@@ -82,7 +83,7 @@ class SelfRightingTask(BaseTask):
             "dq_abs": dq_abs,
             "tau": tau,
             "controll_index_norm": controll_index_norm,
-            "n_sr_semantics_norm": n_sr_semantics_norm,
+            "action_group_norm": action_group_norm,
             "controller_evolution": controller_evolution,
         }
 
@@ -90,14 +91,16 @@ class SelfRightingTask(BaseTask):
 
         f = self._features
         obs = np.concatenate([[f["alpha"]], f["dir_v"], [f["v_abs"]], [f["omega"][0]], [f["dq_abs"]], f["q"],
-                              f["qr_norm"], f["tau"], f["controll_index_norm"], f["n_sr_semantics_norm"],
+                              f["qr_norm"], f["tau"], f["controll_index_norm"], f["action_group_norm"],
                               f["controller_evolution"]])
 
         tpe_features = obs[:19]
 
-        probs = self.tpe.predict(tpe_features)
+        self.tpe.predict(tpe_features)
 
-        if probs is None:
+        if self.tpe.state.valid:
+            probs = self.tpe.state.phase_probs
+        else:
             probs = np.zeros(self.tpe.probs_dim)
 
         self.tpe_probs = probs
@@ -111,10 +114,12 @@ class SelfRightingTask(BaseTask):
         f = self._features
         state = self.state_copy
         rs = state.robot
-        cs = state.controller
+        cs = state.low_level
+        ts = state.task_state
+        ps = state.tpe
 
         alpha = f["alpha"]
-        current_controller_idx = cs.controller_index
+        current_controller_idx = ts.controller_index
 
         if current_controller_idx != self.last_controller_idx:
             self.joint_stagnation_counter = 0
@@ -153,7 +158,8 @@ class SelfRightingTask(BaseTask):
         f = self._features
         state = self.state_copy
         rs = state.robot
-        cs = state.controller
+        cs = state.low_level
+        ts = state.task_state
 
         alpha = f["alpha"]
 

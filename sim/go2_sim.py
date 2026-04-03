@@ -25,8 +25,7 @@ class Go2Sim:
         # -------------------------------
         self.state = SystemState()
         self.robot_state = self.state.robot
-        self.controller_state = self.state.controller
-        self.tpe_state = self.state.tpe
+        self.low_level_state = self.state.low_level
 
         # -------------------------------
         # PINOCCHIO
@@ -54,28 +53,10 @@ class Go2Sim:
         self.KD = np.eye(12) * 2.0
 
         # ------------------------------
-        # JOINT LIMITS
+        # JOINT AND TORQUE LIMITS
         # ------------------------------
-        self.joint_limits = np.array([
-            [-1.0472, 1.0472],
-            [-1.5708, 3.4907],
-            [-2.7227, -0.83776],
-            [-1.0472, 1.0472],
-            [-1.5708, 3.4907],
-            [-2.7227, -0.83776],
-            [-1.0472, 1.0472],
-            [-0.5236, 4.5379],
-            [-2.7227, -0.83776],
-            [-1.0472, 1.0472],
-            [-0.5236, 4.5379],
-            [-2.7227, -0.83776],
-        ])
-
-        # ------------------------------
-        # TORQUE LIMITS
-        # ------------------------------
-        torque_leg = np.array([23.7, 23.7, 45.43])
-        self.torque_limits = np.tile(torque_leg, 4)
+        self.joint_limits = self.pin_engine.get_joint_limits()
+        self.torque_limits = self.pin_engine.get_torque_limits()
 
         # -------------------------------
         # VIEWER
@@ -151,10 +132,10 @@ class Go2Sim:
 
         q = self.robot_state.q
         dq = self.robot_state.dq
-        qr = self.robot_state.qr
+        qr = self.low_level_state.qr
 
-        KP = self.controller_state.Kp
-        KD = self.controller_state.Kd
+        KP = self.low_level_state.Kp
+        KD = self.low_level_state.Kd
 
         q_error = qr - q
         dq_error = -dq
@@ -163,9 +144,9 @@ class Go2Sim:
         tau_g = self.pin_engine.gravity()
 
         tau = tau_pd + tau_g
-        self.controller_state.tau_pd = tau_pd
-        self.controller_state.tau_g = tau_g
-        self.controller_state.tau = tau
+        self.low_level_state.tau_pd = tau_pd
+        self.low_level_state.tau_g = tau_g
+        self.low_level_state.tau = tau
 
         return np.clip(tau_pd + tau_g, -self.torque_limits, self.torque_limits)
 
@@ -216,8 +197,6 @@ class Go2Sim:
     # ======================================================
     def reset_robot_pose(self, q0=None, b0=None, r0=None):
 
-        self.controller_state.pc_debug[:, :] = 0
-
         if q0 is None:
             q0 = [0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7]
 
@@ -243,7 +222,7 @@ class Go2Sim:
 
         self.mj_data.qvel[:] = 0.0
 
-        self.robot_state.qr = q0.copy()
+        self.low_level_state.qr = q0.copy()
 
         mujoco.mj_forward(self.mj_model, self.mj_data)
 

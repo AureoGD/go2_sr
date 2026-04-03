@@ -17,7 +17,7 @@ class BaseTimeController:
                  delta_padding=None,
                  seed=None):
 
-        self.task_level = None
+        self.action_group = None
         self.state = state
         self.t_cont = t_cont
         self.tick = 0

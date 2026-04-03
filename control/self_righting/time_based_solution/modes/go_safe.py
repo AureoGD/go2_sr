@@ -20,4 +20,4 @@ class GoSafe(BaseTimeController):
 
         super().__init__(state, references, settling_times, delta_times=delta_times, seed=seed)
 
-        self.task_level = 1
+        self.action_group = 1

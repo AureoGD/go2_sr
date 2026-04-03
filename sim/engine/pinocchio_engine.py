@@ -51,6 +51,11 @@ class PinocchioEngine:
 
                 self.frames[leg][part] = self.model.getFrameId(name)
 
+        # -------------------------------
+        # JOINT & TORQUE LIMITS
+        # -------------------------------
+        self._extract_joint_limits()
+
         # cache para acesso direto por string
         self._frame_cache = {}
 
@@ -200,3 +205,26 @@ class PinocchioEngine:
         tau = pin.computeGeneralizedGravity(self.model, self.data, self.q)[6:]
 
         return self.reorder_legs(tau)
+
+    def _extract_joint_limits(self):
+
+        lower = self.model.lowerPositionLimit
+        upper = self.model.upperPositionLimit
+        effort = self.model.effortLimit
+
+        joint_lower = lower[7:]
+        joint_upper = upper[7:]
+        joint_effort = effort[6:]
+
+        joint_lower = self.reorder_legs(joint_lower)
+        joint_upper = self.reorder_legs(joint_upper)
+        joint_effort = self.reorder_legs(joint_effort)
+
+        self.joint_limits = np.stack([joint_lower, joint_upper], axis=1)
+        self.torque_limits = joint_effort
+
+    def get_joint_limits(self):
+        return self.joint_limits.copy()
+
+    def get_torque_limits(self):
+        return self.torque_limits.copy()

@@ -15,5 +15,5 @@ class SmoothFilter():
         self.beta = 1 - self.alpha
 
     def smooth_reference(self):
-        error = self.qHL - self.state.robot.qr
+        error = self.qHL - self.state.low_level.qr
         return self.beta * error

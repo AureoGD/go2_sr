@@ -10,7 +10,7 @@ from env.go2_env import Go2Env
 from env.normalizer import StateNormalizer
 from env.tasks.self_righting_task import SelfRightingTask
 from tpe.tpe_module import TPEModule
-from control.scheduler_tb import SchedulerTB
+from control.self_righting.time_based_solution.time_based_scheduler import SchedulerTB
 
 MAX_INT = 3000
 

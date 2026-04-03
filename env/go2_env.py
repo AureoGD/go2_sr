@@ -66,6 +66,8 @@ class Go2Env(gym.Env):
         self.sim.simulation_loop(action)
 
         state = self.sim.state
+        state.task_state = self.sim.controller.task_state
+        state.tpe = self.task.tpe.state
 
         # --------------------------------------
         # Task block
@@ -74,8 +76,6 @@ class Go2Env(gym.Env):
         self.task.compute_features(state)
 
         obs = self.task.get_obs()
-
-        state.tpe.probs = self.task.get_tpe_probs()
 
         reward = self.task.evaluate_reward()
 
@@ -97,6 +97,7 @@ class Go2Env(gym.Env):
         self.sim.reset_robot_pose(q0=q0, b0=b0, r0=r0)
 
         state = self.sim.state
+        state.task_state = self.sim.controller.task_state
 
         # reset normalizer via task
         if self.task.normalizer is not None:

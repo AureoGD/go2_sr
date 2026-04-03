@@ -8,7 +8,7 @@ class Hold(BaseTimeController):
         state = kwargs.get("state")
         super().__init__(state, references=[], settling_times=[])
 
-        self.task_level = 0
+        self.action_group = 0
 
     def update_dqr(self):
 

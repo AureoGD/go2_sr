@@ -1,6 +1,6 @@
 import numpy as np
-from control.self_righting import BaseSelfRighting
-
+from control.self_righting.base_self_righting_controller import BaseSelfRighting
+from control.self_righting.time_based_solution.state import TimeBasedState
 # -------------------------------------------------
 # Import time-based controllers
 # -------------------------------------------------
@@ -31,6 +31,8 @@ class SchedulerTB(BaseSelfRighting):
     def __init__(self, **kwargs):
         super().__init__()
 
+        self.task_state = TimeBasedState()
+
         # Remove parâmetros que não devem ser propagados
         self._base_kwargs = {k: v for k, v in kwargs.items() if k not in ["robot_states", "seed"]}
 
@@ -44,7 +46,7 @@ class SchedulerTB(BaseSelfRighting):
         self.n_controllers = 0
         self._controllers_initialized = False
 
-        self.last_controller = None
+        self.task_state.last_controller = None
         self.delta_qr = np.zeros(12)
 
     def get_num_modes(self):
@@ -68,7 +70,7 @@ class SchedulerTB(BaseSelfRighting):
     # ======================================================
     def reset_phase(self):
 
-        self.last_controller = None
+        self.task_state.last_controller = None
         self.delta_qr[:] = 0.0
         self._controllers_initialized = False
 
@@ -88,10 +90,10 @@ class SchedulerTB(BaseSelfRighting):
         if controller_idx < 0 or controller_idx >= self.n_controllers:
             return np.zeros(12), self.Kp_vec, self.Kd_vec
 
-        if self.last_controller != controller_idx:
+        if self.task_state.last_controller != controller_idx:
             self.controllers[controller_idx].reset_controller()
             self.delta_qr[:] = 0.0
-            self.last_controller = controller_idx
+            self.task_state.last_controller = controller_idx
 
         active_ctrl = self.controllers[controller_idx]
 
@@ -99,9 +101,9 @@ class SchedulerTB(BaseSelfRighting):
 
         percent_task = np.clip(active_ctrl.get_elapsed_time() / active_ctrl.get_total_time(), 0, 1)
 
-        state.controller.controller_evolution = percent_task
-        state.controller.sr_semantics = active_ctrl.task_level
-        state.controller.controller_index = action
+        self.task_state.controller_index = controller_idx
+        self.task_state.action_group = active_ctrl.action_group
+        self.task_state.controller_evolution = percent_task
 
         return self.delta_qr, self.Kp_vec, self.Kd_vec
 
