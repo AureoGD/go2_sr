@@ -1,9 +1,8 @@
-from control.time_based_stochastic.time_base_controller import BaseTimeController
-from control.rgc_mpc.smooth_filter import SmoothFilter
+from control.self_righting.time_based_solution.tb_base_controller import BaseTimeController
 import numpy as np
 
 
-class PrepareCW(BaseTimeController):
+class PrepareCCW(BaseTimeController):
 
     def __init__(self, **kwargs):
 
@@ -12,8 +11,8 @@ class PrepareCW(BaseTimeController):
         stochastic = kwargs.get("stochastic", False)
 
         references = [
-            np.array([[0.2, 1.4, -2.6, -0.8, 1.4, -2.6, 0.2, 1.4, -2.6, -0.8, 4.45, -2.5]]),
-            np.array([[-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, -0.5, 4.2, -2.25]])
+            np.array([[0.8, 1.4, -2.6, 0.2, 1.4, -2.6, -0.8, 4.45, -2.5, -0.2, 1.4, -2.6]]),
+            np.array([[0.8, 1.0, -2.6, 0.6, 1.5, -2.0, -0.5, 4.2, -2.25, 0.6, 1.5, -2.0]])
         ]
 
         settling_times = [1.0, 2.0]

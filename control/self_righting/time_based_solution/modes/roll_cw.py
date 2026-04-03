@@ -1,5 +1,4 @@
-from control.time_based_stochastic.time_base_controller import BaseTimeController
-from control.rgc_mpc.smooth_filter import SmoothFilter
+from control.self_righting.time_based_solution.tb_base_controller import BaseTimeController
 import numpy as np
 
 

@@ -1,17 +1,10 @@
 import numpy as np
-from control.rgc_mpc.smooth_filter import SmoothFilter
+from control.self_righting.time_based_solution.smooth_filter import SmoothFilter
 
 
 class BaseTimeController:
     """
     Generic time-based controller.
-
-    Handles:
-        - Multiple motion stages
-        - Optional stochastic settling times
-        - Optional stochastic final padding
-        - Time-dependent update
-        - Safe handling of zero-stage controllers (e.g., Hold)
     """
 
     def __init__(self,
@@ -38,7 +31,14 @@ class BaseTimeController:
         self.base_times = np.array(settling_times)
 
         # -------------------------------------------------
-        # Randomize stage times (optional)
+        # 🔥 Validação importante
+        # -------------------------------------------------
+        if delta_times is not None:
+            assert len(delta_times) == len(settling_times), \
+                "delta_times must match settling_times length"
+
+        # -------------------------------------------------
+        # Randomize stage times
         # -------------------------------------------------
         if delta_times is not None and len(self.base_times) > 0:
             delta_times = np.array(delta_times)
@@ -49,7 +49,7 @@ class BaseTimeController:
             self.stage_times = self.base_times.copy()
 
         # -------------------------------------------------
-        # Randomize final padding (optional)
+        # Randomize final padding
         # -------------------------------------------------
         if delta_padding is not None:
             pad_noise = rng.uniform(-delta_padding, delta_padding)
@@ -58,7 +58,7 @@ class BaseTimeController:
             self.final_padding = final_padding
 
         # -------------------------------------------------
-        # Create motion stages (SmoothFilters)
+        # Create motion stages
         # -------------------------------------------------
         self.stages = []
 
@@ -73,12 +73,9 @@ class BaseTimeController:
             self.cumulative_times = np.cumsum(self.stage_times)
             self.total_time_task = self.cumulative_times[-1] + self.final_padding
         else:
-            # For controllers like Hold (no motion stages)
             self.cumulative_times = np.array([])
             self.total_time_task = self.final_padding
 
-    # -------------------------------------------------
-    # Main update
     # -------------------------------------------------
     def update_dqr(self):
         spend_time = self.tick * self.t_cont
@@ -97,24 +94,17 @@ class BaseTimeController:
         return delta_qr
 
     # -------------------------------------------------
-    # Reset controller state
-    # -------------------------------------------------
     def reset_controller(self):
         self.tick = 0
 
-        # Reset SmoothFilters if they have reset method
         for stage in self.stages:
             if hasattr(stage, "reset"):
                 stage.reset()
 
     # -------------------------------------------------
-    # Expose total expected duration
-    # -------------------------------------------------
     def get_total_time(self):
         return self.total_time_task
 
-    # -------------------------------------------------
-    # Expose elapsed time
     # -------------------------------------------------
     def get_elapsed_time(self):
         return self.tick * self.t_cont

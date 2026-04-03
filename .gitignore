@@ -5,3 +5,7 @@ results
 vizenv
 tpe/vizenv
 tpe/data
+__pycache__/
+*.pyc
+*.pt
+*.npz

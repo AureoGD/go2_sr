@@ -1,20 +1,22 @@
 import numpy as np
-from control.base_self_righting import BaseSelfRighting
+from control.self_righting import BaseSelfRighting
 
 # -------------------------------------------------
-# Import stochastic time-based controllers
+# Import time-based controllers
 # -------------------------------------------------
-from control.time_based_stochastic.hold import Hold
-from control.time_based_stochastic.go_safe import GoSafe
-from control.time_based_stochastic.prepare_cw import PrepareCW
-from control.time_based_stochastic.roll_cw import RollCW
-from control.time_based_stochastic.landing_cw import LandingCW
-from control.time_based_stochastic.prone_cw import ProneCW
-from control.time_based_stochastic.stand_up import StandUp
-from control.time_based_stochastic.prepare_ccw import PrepareCCW
-from control.time_based_stochastic.roll_ccw import RollCCW
-from control.time_based_stochastic.landing_ccw import LandingCCW
-from control.time_based_stochastic.prone_ccw import ProneCCW
+from control.self_righting.time_based_solution.modes import (
+    Hold,
+    GoSafe,
+    PrepareCW,
+    RollCW,
+    LandingCW,
+    ProneCW,
+    StandUp,
+    PrepareCCW,
+    RollCCW,
+    LandingCCW,
+    ProneCCW,
+)
 
 CONTROLLER_CLASSES = [
     Hold, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUp, PrepareCCW, RollCCW, LandingCCW, ProneCCW
@@ -29,7 +31,8 @@ class SchedulerTB(BaseSelfRighting):
     def __init__(self, **kwargs):
         super().__init__()
 
-        self._base_kwargs = {k: v for k, v in kwargs.items() if k != "robot_states"}
+        # Remove parâmetros que não devem ser propagados
+        self._base_kwargs = {k: v for k, v in kwargs.items() if k not in ["robot_states", "seed"]}
 
         kp = kwargs.get("kp", 50.0)
         kd = kwargs.get("kd", 3.0)
@@ -50,7 +53,12 @@ class SchedulerTB(BaseSelfRighting):
 
     def _instantiate_controllers(self, state):
 
-        self.controllers = [cls(state=state, **self._base_kwargs) for cls in CONTROLLER_CLASSES]
+        self.controllers = [
+            cls(
+                state=state,
+                seed=np.random.randint(0, 1_000_000),  # 🔥 seed independente
+                **self._base_kwargs) for cls in CONTROLLER_CLASSES
+        ]
 
         self.n_controllers = len(self.controllers)
         self._controllers_initialized = True
@@ -90,6 +98,7 @@ class SchedulerTB(BaseSelfRighting):
         self.delta_qr = active_ctrl.update_dqr().reshape(12)
 
         percent_task = np.clip(active_ctrl.get_elapsed_time() / active_ctrl.get_total_time(), 0, 1)
+
         state.controller.controller_evolution = percent_task
         state.controller.sr_semantics = active_ctrl.task_level
         state.controller.controller_index = action

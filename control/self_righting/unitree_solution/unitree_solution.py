@@ -1,5 +1,5 @@
 import numpy as np
-from environment.strategies.base_self_righting import BaseSelfRighting
+from self_righting.base_self_righting_controller import BaseSelfRighting
 
 
 class UnitreeSelfRighting(BaseSelfRighting):
