@@ -4,8 +4,7 @@ import numpy as np
 class SmoothFilter():
 
     def __init__(self, **kwargs):
-        """ Smooth exponential filer """
-        self.robot_states = kwargs.get('robot_states')
+        self.state = kwargs.get('state')
         self.settling_time = kwargs.get('settling_time')
         self.t_cont = kwargs.get('t_cont')
         self.qHL = kwargs.get('qHL')
@@ -16,5 +15,5 @@ class SmoothFilter():
         self.beta = 1 - self.alpha
 
     def smooth_reference(self):
-        error = self.qHL - self.robot_states.qr
+        error = self.qHL - self.state.robot.qr
         return self.beta * error

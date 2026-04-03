@@ -1,5 +1,5 @@
 import numpy as np
-from environment.strategies.rgc_mpc.smooth_filter import SmoothFilter
+from control.rgc_mpc.smooth_filter import SmoothFilter
 
 
 class BaseTimeController:
@@ -15,7 +15,7 @@ class BaseTimeController:
     """
 
     def __init__(self,
-                 robot_states,
+                 state,
                  references,
                  settling_times,
                  t_cont=0.01,
@@ -24,7 +24,8 @@ class BaseTimeController:
                  delta_padding=None,
                  seed=None):
 
-        self.robot_states = robot_states
+        self.task_level = None
+        self.state = state
         self.t_cont = t_cont
         self.tick = 0
 
@@ -62,7 +63,7 @@ class BaseTimeController:
         self.stages = []
 
         for qr, st in zip(self.references, self.stage_times):
-            config = {"robot_states": self.robot_states, "settling_time": st, "t_cont": self.t_cont, "qHL": qr}
+            config = {"state": self.state, "settling_time": st, "t_cont": self.t_cont, "qHL": qr}
             self.stages.append(SmoothFilter(**config))
 
         # -------------------------------------------------
@@ -86,11 +87,11 @@ class BaseTimeController:
             idx = np.searchsorted(self.cumulative_times, spend_time)
 
             if idx < len(self.stages):
-                delta_qr = self.stages[idx].smooth_reference().reshape(12, 1)
+                delta_qr = self.stages[idx].smooth_reference()
             else:
-                delta_qr = np.zeros((12, 1))
+                delta_qr = np.zeros(12)
         else:
-            delta_qr = np.zeros((12, 1))
+            delta_qr = np.zeros(12)
 
         self.tick += 1
         return delta_qr

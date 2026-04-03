@@ -1,4 +1,4 @@
-from environment.go2_sim import Go2ModelSimMuJoCo
+from sim.go2_sim import Go2ModelSimMuJoCo
 from tpe.phases import Phase
 from tpe.model import TPE
 

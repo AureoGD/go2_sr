@@ -1,39 +1,20 @@
 import numpy as np
-from environment.strategies.base_self_righting import BaseSelfRighting
+from control.base_self_righting import BaseSelfRighting
 
 # -------------------------------------------------
 # Import stochastic time-based controllers
 # -------------------------------------------------
-from environment.strategies.time_based_stochastic.hold import Hold
-from environment.strategies.time_based_stochastic.go_safe import GoSafe
-from environment.strategies.time_based_stochastic.prepare_cw import PrepareCW
-from environment.strategies.time_based_stochastic.roll_cw import RollCW
-from environment.strategies.time_based_stochastic.landing_cw import LandingCW
-from environment.strategies.time_based_stochastic.prone_cw import ProneCW
-from environment.strategies.time_based_stochastic.stand_up import StandUp
-from environment.strategies.time_based_stochastic.prepare_ccw import PrepareCCW
-from environment.strategies.time_based_stochastic.roll_ccw import RollCCW
-from environment.strategies.time_based_stochastic.landing_ccw import LandingCCW
-from environment.strategies.time_based_stochastic.prone_ccw import ProneCCW
-
-# -------------------------------------------------
-# Controller ordering (IMPORTANT)
-# -------------------------------------------------
-# Index -> Controller
-#
-# 0  -> Hold
-# 1  -> GoSafe
-# 2  -> PrepareCW
-# 3  -> RollCW
-# 4  -> LandingCW
-# 5  -> ProneCW
-# 6  -> StandUp
-# 7  -> PrepareCCW
-# 8  -> RollCCW
-# 9  -> LandingCCW
-# 10 -> ProneCCW
-#
-# This mapping MUST stay consistent with NN action space.
+from control.time_based_stochastic.hold import Hold
+from control.time_based_stochastic.go_safe import GoSafe
+from control.time_based_stochastic.prepare_cw import PrepareCW
+from control.time_based_stochastic.roll_cw import RollCW
+from control.time_based_stochastic.landing_cw import LandingCW
+from control.time_based_stochastic.prone_cw import ProneCW
+from control.time_based_stochastic.stand_up import StandUp
+from control.time_based_stochastic.prepare_ccw import PrepareCCW
+from control.time_based_stochastic.roll_ccw import RollCCW
+from control.time_based_stochastic.landing_ccw import LandingCCW
+from control.time_based_stochastic.prone_ccw import ProneCCW
 
 CONTROLLER_CLASSES = [
     Hold, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUp, PrepareCCW, RollCCW, LandingCCW, ProneCCW
@@ -41,98 +22,82 @@ CONTROLLER_CLASSES = [
 
 
 class SchedulerTB(BaseSelfRighting):
-    """
-    Time-based self-righting scheduler.
-    Neural network selects controller index directly.
-    """
 
+    # ======================================================
+    # INIT
+    # ======================================================
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__()
 
-        # -------------------------------------------------
-        # Store base kwargs (needed for stochastic reset)
-        # -------------------------------------------------
-        self._base_kwargs = kwargs.copy()
+        self._base_kwargs = {k: v for k, v in kwargs.items() if k != "robot_states"}
 
-        # -------------------------------------------------
-        # Gains
-        # -------------------------------------------------
-        self.kp = kwargs.get("kp", 50)
-        self.kd = kwargs.get("kd", 3)
+        kp = kwargs.get("kp", 50.0)
+        kd = kwargs.get("kd", 3.0)
 
-        self.KP = self.kp * np.eye(12)
-        self.KD = self.kd * np.eye(12)
+        self.Kp_vec = np.ones(12) * kp
+        self.Kd_vec = np.ones(12) * kd
 
-        # -------------------------------------------------
-        # Instantiate controllers
-        # -------------------------------------------------
-        self._instantiate_controllers()
+        self.controllers = None
+        self.n_controllers = 0
+        self._controllers_initialized = False
 
-        # -------------------------------------------------
-        # Runtime state
-        # -------------------------------------------------
         self.last_controller = None
         self.delta_qr = np.zeros(12)
 
-    # -------------------------------------------------
-    # Controller instantiation helper
-    # -------------------------------------------------
-    def _instantiate_controllers(self):
-        """
-        Instantiate controllers.
-        Used at initialization and episode reset.
-        """
-        self.controllers = [cls(**self._base_kwargs) for cls in CONTROLLER_CLASSES]
+    def get_num_modes(self):
+        self.num_modes = len(CONTROLLER_CLASSES)
+        return self.num_modes
+
+    def _instantiate_controllers(self, state):
+
+        self.controllers = [cls(state=state, **self._base_kwargs) for cls in CONTROLLER_CLASSES]
+
         self.n_controllers = len(self.controllers)
+        self._controllers_initialized = True
 
-    # -------------------------------------------------
-    # Episode reset (IMPORTANT for stochastic timing)
-    # -------------------------------------------------
+    # ======================================================
+    # RESET
+    # ======================================================
     def reset_phase(self):
-        """
-        Reset scheduler at episode start.
-        Re-instantiates controllers to resample
-        stochastic timing if enabled.
-        """
+
         self.last_controller = None
-        self.delta_qr = np.zeros(12)
+        self.delta_qr[:] = 0.0
+        self._controllers_initialized = False
 
-        # Recreate controllers (important for stochastic)
-        self._instantiate_controllers()
+    # ======================================================
+    # MAIN LOGIC
+    # ======================================================
+    def compute_action(self, state, action):
 
-    # -------------------------------------------------
-    # Main update entry point
-    # -------------------------------------------------
-    def update(self, controller=None):
-        """
-        Args:
-            controller (int): Selected by neural network.
-        Returns:
-            delta_qr (np.ndarray): Joint reference increment
-            KP (np.ndarray): Proportional gains
-            KD (np.ndarray): Derivative gains
-        """
+        if not self._controllers_initialized:
+            self._instantiate_controllers(state)
 
-        # Safety fallback
-        if controller is None:
-            controller = 0
+        if action is None:
+            controller_idx = 0
+        else:
+            controller_idx = int(action)
 
-        # Validate index
-        if controller < 0 or controller >= self.n_controllers:
-            return np.zeros(12), self.KP, self.KD
+        if controller_idx < 0 or controller_idx >= self.n_controllers:
+            return np.zeros(12), self.Kp_vec, self.Kd_vec
 
-        # If controller changed → reset it
-        if self.last_controller != controller:
-            self.controllers[controller].reset_controller()
-            self.delta_qr = np.zeros(12)
-            self.last_controller = controller
+        if self.last_controller != controller_idx:
+            self.controllers[controller_idx].reset_controller()
+            self.delta_qr[:] = 0.0
+            self.last_controller = controller_idx
 
-        active_ctrl = self.controllers[controller]
+        active_ctrl = self.controllers[controller_idx]
 
-        # Update controller
         self.delta_qr = active_ctrl.update_dqr().reshape(12)
 
-        return self.delta_qr, self.KP, self.KD
+        percent_task = np.clip(active_ctrl.get_elapsed_time() / active_ctrl.get_total_time(), 0, 1)
+        state.controller.controller_evolution = percent_task
+        state.controller.sr_semantics = active_ctrl.task_level
+        state.controller.controller_index = action
 
+        return self.delta_qr, self.Kp_vec, self.Kd_vec
+
+    # ======================================================
+    # OPTIONAL
+    # ======================================================
     def get_phase_mapping(self):
         return None, None

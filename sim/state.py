@@ -38,6 +38,13 @@ class ControllerState:
     tau: np.ndarray = field(default_factory=lambda: np.zeros(12))
 
     # --------------------------------------
+    # Scheduller
+    # --------------------------------------
+    controller_index: int = -1
+    controller_evolution: float = 0.0
+    sr_semantics: int = -1
+
+    # --------------------------------------
     # MPC / OPTIMIZATION
     # --------------------------------------
     mpc_obj_val: float = 0.0
@@ -55,6 +62,12 @@ class ControllerState:
 
 
 @dataclass
+class TaskState:
+    probs: np.ndarray = field(default_factory=lambda: np.zeros(4))
+
+
+@dataclass
 class SystemState:
     robot: Go2State = field(default_factory=Go2State)
     controller: ControllerState = field(default_factory=ControllerState)
+    tpe: TaskState = field(default_factory=TaskState)

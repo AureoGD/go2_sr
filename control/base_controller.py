@@ -5,7 +5,7 @@ import gymnasium as gym
 class BaseController(ABC):
 
     def __init__(self):
-        pass
+        self.num_modes = 0
 
     # ======================================================
     # ACTION SPACE (obrigatório)

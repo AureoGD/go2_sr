@@ -26,6 +26,7 @@ class Go2Sim:
         self.state = SystemState()
         self.robot_state = self.state.robot
         self.controller_state = self.state.controller
+        self.tpe_state = self.state.tpe
 
         # -------------------------------
         # PINOCCHIO

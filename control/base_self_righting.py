@@ -1,37 +1,86 @@
 import numpy as np
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+import gymnasium as gym
+
+from control.base_controller import BaseController
 
 
-class BaseSelfRighting(ABC):
+class BaseSelfRighting(BaseController):
 
-    def __init__(self, **kwargs):
+    def __init__(self):
+        super().__init__()
+
+        # --------------------------------------
+        # INTERNAL MEMORY
+        # --------------------------------------
+        self.dqr = np.zeros(12)
+
+    # ======================================================
+    # ACTION SPACE (default: discrete modes)
+    # ======================================================
+    def get_action_space(self):
         """
-        Base constructor.
-        Expects 'robot_states' in kwargs.
+        Default self-righting uses discrete modes.
+        Override if needed.
         """
-        self.robot_states = kwargs.get('robot_states')
-
-        # Default returns if things go wrong
-        self.qr_ant = np.zeros((12, 1))
-        self.KP = np.eye(12)
-        self.KD = np.eye(12)
+        self.get_num_modes()
+        return gym.spaces.Discrete(self.num_modes)
 
     @abstractmethod
-    def update(self, mode=None):
+    def get_num_modes(self):
+        pass
+
+    # ======================================================
+    # BEFORE STEP (MAIN ENTRY POINT)
+    # ======================================================
+    def before_step(self, state, action):
+
+        rs = state.robot
+        cs = state.controller
+
+        # --------------------------------------
+        # 1. APPLY PREVIOUS DELTA (MEMORY)
+        # --------------------------------------
+        rs.qr = rs.qr + self.dqr
+
+        # --------------------------------------
+        # 2. COMPUTE NEW DELTA
+        # --------------------------------------
+        self.dqr, Kp, Kd = self.compute_action(state, action)
+
+        # --------------------------------------
+        # 3. WRITE BACK
+        # --------------------------------------
+        rs.dqr = self.dqr
+        cs.Kp = Kp
+        cs.Kd = Kd
+
+    # ======================================================
+    # CORE LOGIC (TO IMPLEMENT)
+    # ======================================================
+    @abstractmethod
+    def compute_action(self, state, action):
         """
-        Computes the next command.
-        Args:
-            mode (int, optional): The strategy ID provided by the Neural Network.
-                                  Unitree logic might ignore this.
-                                  RGC logic requires this.
-        Returns:
-            (q_target, KP, KD)
+        Must return:
+            qr (12,)
+            Kp (12,)
+            Kd (12,)
         """
         pass
 
+    # ======================================================
+    # RESET
+    # ======================================================
+    def reset(self):
+        self.dqr = np.zeros(12)
+        self.reset_phase()
+
     @abstractmethod
     def reset_phase(self):
-        """
-        Resets internal timers or state machines.
-        """
+        pass
+
+    # ======================================================
+    # OPTIONAL
+    # ======================================================
+    def after_step(self, state):
         pass

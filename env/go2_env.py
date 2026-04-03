@@ -1,7 +1,6 @@
 import gymnasium as gym
 import numpy as np
 from sim.go2_sim import Go2Sim
-from env.normalizer import StateNormalizer
 
 
 class Go2Env(gym.Env):
@@ -11,11 +10,16 @@ class Go2Env(gym.Env):
         super().__init__()
 
         controller = kwargs.get("controller", None)
+        task = kwargs.get("task", None)
 
         if controller is None:
             raise ValueError("Controller must be provided to Go2Env")
 
+        if task is None:
+            raise ValueError("Task must be provided to Go2Env")
+
         self.controller = controller
+        self.task = task
 
         # --------------------------------------
         # SIMULATION
@@ -30,10 +34,9 @@ class Go2Env(gym.Env):
             viewer=kwargs.get("viewer", None),
         )
 
-        # --------------------------------------
-        # NORMALIZER
-        # --------------------------------------
-        self.normalizer = StateNormalizer(joint_limits=self.sim.joint_limits, torque_limits=self.sim.torque_limits)
+        self.task.normalizer.set_robot_limits(joint_limits=self.sim.joint_limits, torque_limits=self.sim.torque_limits)
+        n_modes = self.controller.get_num_modes()
+        self.task.normalizer.set_n_actions(n_modes)
 
         # --------------------------------------
         # ENV STATE
@@ -47,7 +50,7 @@ class Go2Env(gym.Env):
         # --------------------------------------
         self.action_space = self.controller.get_action_space()
 
-        obs_dim = self.normalizer.get_obs_dim()
+        obs_dim = self.task.get_obs_dim()
 
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(obs_dim,), dtype=np.float32)
 
@@ -56,20 +59,6 @@ class Go2Env(gym.Env):
         # --------------------------------------
         self.env_id = env_id
 
-    def reset(self, *, seed=None, q0=None, b0=None, r0=None):
-
-        super().reset(seed=seed)
-
-        self.sim.reset_robot_pose(q0=q0, b0=b0, r0=r0)
-
-        self.current_step = 0
-        self.ep_reward = 0.0
-
-        state = self.sim.state
-        obs = self.normalizer.encode(state)
-
-        return obs, {}
-
     def step(self, action):
 
         self.current_step += 1
@@ -77,19 +66,48 @@ class Go2Env(gym.Env):
         self.sim.simulation_loop(action)
 
         state = self.sim.state
-        obs = self.normalizer.encode(state)
 
-        reward = self._reward()
+        # --------------------------------------
+        # Task block
+        # --------------------------------------
+
+        self.task.compute_features(state)
+
+        obs = self.task.get_obs()
+
+        state.tpe.probs = self.task.get_tpe_probs()
+
+        reward = self.task.evaluate_reward()
+
+        terminated, truncated = self.task.check_termination(self.current_step)
+
+        info = self.task.gen_info()
+
+        # --------------------------------------
+
         self.ep_reward += reward
-
-        terminated, truncated = self._termination()
-
-        info = {}
 
         return obs, reward, terminated, truncated, info
 
-    def _reward(self):
-        pass
+    def reset(self, *, seed=None, q0=None, b0=None, r0=None):
 
-    def _termination(self):
-        pass
+        if seed is not None:
+            np.random.seed(seed)
+
+        self.sim.reset_robot_pose(q0=q0, b0=b0, r0=r0)
+
+        state = self.sim.state
+
+        # reset normalizer via task
+        if self.task.normalizer is not None:
+            self.task.normalizer.reset_reference()
+
+        # forma correta (encapsulada)
+        obs = self.task.compute_initial_obs(state)
+        self.task.reset()
+        self.task.set_step_limit(self.max_step)
+
+        self.current_step = 0
+        self.ep_reward = 0.0
+
+        return obs, {}
