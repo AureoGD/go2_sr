@@ -11,7 +11,7 @@ class SelfRightingTask(BaseTask):
         self.tpe = tpe
         self.tpe_probs = None
 
-        self.obs_dim = self.tpe.probs_dim + 43
+        self.obs_dim = self.tpe.probs_dim + 46
 
         self.n_action_group = 6
         self.min_upright_height = 0.1
@@ -66,7 +66,7 @@ class SelfRightingTask(BaseTask):
 
         tau = self.normalizer.normalize_tau(cs.tau)
 
-        controll_index_norm = np.array([ts.controller_index / self.normalizer.n_actions])
+        control_index_norm = np.array([ts.controller_index / self.normalizer.n_actions])
 
         action_group_norm = np.array([ts.action_group / self.n_action_group])
 
@@ -82,7 +82,7 @@ class SelfRightingTask(BaseTask):
             "dq_norm": dq_norm,
             "dq_abs": dq_abs,
             "tau": tau,
-            "controll_index_norm": controll_index_norm,
+            "control_index_norm": control_index_norm,
             "action_group_norm": action_group_norm,
             "controller_evolution": controller_evolution,
         }
@@ -91,7 +91,7 @@ class SelfRightingTask(BaseTask):
 
         f = self._features
         obs = np.concatenate([[f["alpha"]], f["dir_v"], [f["v_abs"]], [f["omega"][0]], [f["dq_abs"]], f["q"],
-                              f["qr_norm"], f["tau"], f["controll_index_norm"], f["action_group_norm"],
+                              f["qr_norm"], f["tau"], f["control_index_norm"], f["action_group_norm"],
                               f["controller_evolution"]])
 
         tpe_features = obs[:19]
