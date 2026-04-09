@@ -103,6 +103,8 @@ class Go2Sim:
 
             self._com_quantities()
 
+            self._feet_quatities()
+
         # --------------------------------------
         # 4. AFTER STEP
         # --------------------------------------
@@ -124,6 +126,9 @@ class Go2Sim:
     def _com_quantities(self):
         self.robot_state.r_pos = self.pin_engine.com()
         self.robot_state.r_vel = self.pin_engine.vcom()
+
+    def _feet_quatities(self):
+        self.robot_state.foot_contacts = self.pin_engine.feet_positions_array().reshape(12)
 
     # ======================================================
     # LOW-LEVEL CONTROL (PD + gravity)

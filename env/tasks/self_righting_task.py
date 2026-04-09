@@ -16,8 +16,11 @@ class SelfRightingTask(BaseTask):
         self.n_action_group = 6
         self.min_upright_height = 0.1
 
+        self.success = False
+
         self.MIN_DWELL_TICKS = 100
         self.MAX_PHASE_COUNT = 15
+        self.MAX_SWITCHES = 50
 
         self.WEIGHT_ORIENTATION = 0.01
         self.WEIGHT_MODE_HOLD = 2.5
@@ -32,6 +35,10 @@ class SelfRightingTask(BaseTask):
         self.hq = deque(maxlen=self.WINDOW)
         self.hz = deque(maxlen=self.WINDOW)
         self.hth = deque(maxlen=self.WINDOW)
+
+        self.map_control_index_acion_group = [0, 1, 2, 3, 4, 5, 6, 2, 3, 4, 5]
+        self.BODY_PROGRESS_ACTION_GROUP = {3, 5, 6}
+        self.JOINT_PROGRESS_ACTION_GROUP = {1, 2, 4}
 
     def get_obs_dim(self):
         return self.obs_dim
@@ -122,12 +129,12 @@ class SelfRightingTask(BaseTask):
         current_controller_idx = ts.controller_index
 
         if current_controller_idx != self.last_controller_idx:
+            self.last_controller_idx = current_controller_idx
             self.joint_stagnation_counter = 0
             self.stagnation_counter = 0
             self.current_controller_tick = 0
             self.total_controller_idx_changes += 1
 
-            # ✔ keep exactly
             if current_controller_idx == 6:
                 self.bz_initial = rs.b_pos[2].copy()
 
@@ -140,10 +147,21 @@ class SelfRightingTask(BaseTask):
 
         r -= self.WEIGHT_ORIENTATION * (1.0 - alpha)
 
-        self.current_controller_tick += 1
+        if alpha < np.cos(np.deg2rad(30)):
+            r += self.WEIGHT_ORIENTATION
+
+        current_action_group = self.map_control_index_acion_group[current_controller_idx]
+
+        if alpha < 0 and current_action_group in [4, 5, 6]:
+            r -= self.WEIGHT_BAD_ORIENTATION
+
+        if alpha > 0 and current_action_group in [1, 2]:
+            r -= self.WEIGHT_BAD_ORIENTATION
 
         if current_controller_idx == 0:
             r -= self.WEIGHT_IDLE
+
+        self.current_controller_tick += 1
 
         return float(r)
 
@@ -161,19 +179,31 @@ class SelfRightingTask(BaseTask):
         cs = state.low_level
         ts = state.task_state
 
+        if self.bz_initial is not None:
+            z = rs.b_pos[2] - self.bz_initial
+        else:
+            z = 0
+
         alpha = f["alpha"]
+        if alpha > 0.95 and z > 0.1:
+            self.success = True
+
+        too_many_switches = self.total_controller_idx_changes > self.MAX_SWITCHES
+
+        terminated = (self.success or too_many_switches)
 
         truncated = current_step >= self.step_limit
 
         return terminated, truncated
 
     def reset(self):
-        self.bz_initial = 0
+        self.bz_initial = None
         self.last_controller_idx = -1
         self.joint_stagnation_counter = 0
         self.stagnation_counter = 0
         self.current_controller_tick = 0
         self.total_controller_idx_changes = 0
+        self.success = False
 
         self.hq.clear()
         self.hth.clear()
@@ -184,3 +214,8 @@ class SelfRightingTask(BaseTask):
     def compute_initial_obs(self, state):
         self.compute_features(state)
         return self.get_obs()
+
+    def gen_info(self):
+        info = {"sucess_flag": self.success, "sucess_extra_reward": 20}
+
+        return info

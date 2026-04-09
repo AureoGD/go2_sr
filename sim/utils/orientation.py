@@ -18,10 +18,5 @@ def compute_alpha(epsilon):
     g_world = np.array([0.0, 0.0, -1.0])
     g_body = R.T @ g_world
 
-    cos_alpha = -g_body[2]
-    cos_alpha = np.clip(cos_alpha, -1.0, 1.0)
-
-    alpha = np.arccos(cos_alpha)
-    alpha = 1.0 - alpha / np.pi
-
-    return alpha
+    alpha = -g_body[2]
+    return np.clip(alpha, -1.0, 1.0)

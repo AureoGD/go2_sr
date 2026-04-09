@@ -30,16 +30,10 @@ class BaseTimeController:
         self.references = references
         self.base_times = np.array(settling_times)
 
-        # -------------------------------------------------
-        # 🔥 Validação importante
-        # -------------------------------------------------
         if delta_times is not None:
             assert len(delta_times) == len(settling_times), \
                 "delta_times must match settling_times length"
 
-        # -------------------------------------------------
-        # Randomize stage times
-        # -------------------------------------------------
         if delta_times is not None and len(self.base_times) > 0:
             delta_times = np.array(delta_times)
             noise = rng.uniform(-delta_times, delta_times)

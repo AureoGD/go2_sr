@@ -17,8 +17,8 @@ class Go2State:
     r_pos: np.ndarray = field(default_factory=lambda: np.zeros(3))
     r_vel: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
-    contacts: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
-    contact_forces: np.ndarray = field(default_factory=lambda: np.zeros(12))
+    foot_contacts: np.ndarray = field(default_factory=lambda: np.zeros(12))
+    foot_forces: np.ndarray = field(default_factory=lambda: np.zeros(12))
 
 
 @dataclass

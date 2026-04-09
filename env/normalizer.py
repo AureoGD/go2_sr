@@ -54,7 +54,7 @@ class StateNormalizer:
     # ---------------- FEATURE METHODS ----------------------
     # ======================================================
 
-    def compute_alpha(self, state):
+    def compute_alpha(self, epsilon):
         """
         Mede o alinhamento do robô com a gravidade.
 
@@ -71,7 +71,7 @@ class StateNormalizer:
             - observação
             - TPE
         """
-        return compute_alpha(state.robot.epsilon)
+        return compute_alpha(epsilon)
 
     def normalize_q(self, q):
         """
@@ -171,24 +171,35 @@ class StateNormalizer:
         return dir_v, v_abs
 
     def normalize_omega(self, omega):
-        """
-        Normaliza a velocidade angular completa do robô.
 
-        Entrada:
-            omega → vetor (3,)
-
-        Saída:
-            vetor (3,)
-
-        Interpretação:
-            [wx, wy, wz] → rotação completa do corpo
-
-        Usado em:
-            - observação
-            - estabilidade
-        """
         omega = np.asarray(omega).reshape(-1)
-        return np.tanh(omega / (self.omega_scale + self.eps))
+
+        omega_norm = np.linalg.norm(omega)
+
+        dir_omega = omega / (omega_norm + self.eps)
+        omega_abs = np.tanh(omega_norm / (self.omega_scale + self.eps))
+
+        return dir_omega, omega_abs
+
+    # def normalize_omega(self, omega):
+    #     """
+    #     Normaliza a velocidade angular completa do robô.
+
+    #     Entrada:
+    #         omega → vetor (3,)
+
+    #     Saída:
+    #         vetor (3,)
+
+    #     Interpretação:
+    #         [wx, wy, wz] → rotação completa do corpo
+
+    #     Usado em:
+    #         - observação
+    #         - estabilidade
+    #     """
+    #     omega = np.asarray(omega).reshape(-1)
+    #     return np.tanh(omega / (self.omega_scale + self.eps))
 
     # ======================================================
     # POSITION NORMALIZATION

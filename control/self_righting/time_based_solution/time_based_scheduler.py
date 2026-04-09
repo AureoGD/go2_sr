@@ -28,8 +28,10 @@ class SchedulerTB(BaseSelfRighting):
     # ======================================================
     # INIT
     # ======================================================
-    def __init__(self, **kwargs):
+    def __init__(self, stochastic=False, **kwargs):
         super().__init__()
+
+        self.stochastic = stochastic
 
         self.task_state = TimeBasedState()
 
@@ -56,10 +58,8 @@ class SchedulerTB(BaseSelfRighting):
     def _instantiate_controllers(self, state):
 
         self.controllers = [
-            cls(
-                state=state,
-                seed=np.random.randint(0, 1_000_000),  # 🔥 seed independente
-                **self._base_kwargs) for cls in CONTROLLER_CLASSES
+            cls(state=state, seed=np.random.randint(0, 1_000_000), stochastic=self.stochastic, **self._base_kwargs)
+            for cls in CONTROLLER_CLASSES
         ]
 
         self.n_controllers = len(self.controllers)

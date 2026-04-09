@@ -1,46 +1,65 @@
 import mujoco
-from env.go2_env import Go2Env
-from control.self_righting.time_based_solution.time_based_scheduler import SchedulerTB
+import mujoco.viewer
+import gymnasium as gym
+
+from es_framework.core.env_spec import EnvSpec
 from env.normalizer import StateNormalizer
-from tpe.tpe_module import TPEModule
-from env.tasks.self_righting_task import SelfRightingTask
+from tpe.core.tpe_module import TPEModule
 
 
-def create_env(rendering=False):
+def create_env(env_config):
 
     # -----------------------------
     # Mujoco
     # -----------------------------
-    model = mujoco.MjModel.from_xml_path("sim/assets/unitree_go2/scene.xml")
+    model = mujoco.MjModel.from_xml_path(env_config.scene_path)
     data = mujoco.MjData(model)
 
     viewer = None
-    if rendering:
-        viewer = mujoco.viewer.launch_passive(model, data)
+    if env_config.render:
+        try:
+            viewer = mujoco.viewer.launch_passive(model, data)
+        except Exception as e:
+            print(f"[WARN] Viewer not available: {e}")
+            viewer = None
 
     # -----------------------------
     # Components
     # -----------------------------
-    controller = SchedulerTB()
+    controller = env_config.controller_class()
 
-    normalizer = StateNormalizer(joint_limits=1, torque_limits=1)
+    normalizer = StateNormalizer(**env_config.normalizer_params)
 
-    tpe = TPEModule(model_path="tpe_model.pt")
+    tpe = TPEModule(model_path=env_config.tpe_model_path)
 
-    task = SelfRightingTask(normalizer=normalizer, tpe=tpe)
+    task = env_config.task_class(normalizer=normalizer, tpe=tpe)
 
     # -----------------------------
     # Env
     # -----------------------------
-    config = {
-        "urdf_path": "sim/assets/unitree_go2/go2.urdf",
-        "mj_model": model,
-        "mj_data": data,
-        "controller": controller,
-        "task": task,
-        "viewer": viewer
-    }
+    env = env_config.env_class(urdf_path=env_config.urdf_path,
+                               mj_model=model,
+                               mj_data=data,
+                               controller=controller,
+                               task=task,
+                               viewer=viewer)
 
-    env = Go2Env(max_step=100, **config)
+    # -----------------------------
+    # Build EnvSpec
+    # -----------------------------
+    obs_dim = env.observation_space.shape[0]
 
-    return env
+    if isinstance(env.action_space, gym.spaces.Discrete):
+        act_dim = env.action_space.n
+        is_discrete = True
+
+    elif isinstance(env.action_space, gym.spaces.Box):
+        act_dim = env.action_space.shape[0]
+        is_discrete = False
+
+    else:
+        raise NotImplementedError(f"Unsupported action space: {type(env.action_space)}")
+
+    env_spec = EnvSpec(obs_dim=obs_dim, act_dim=act_dim, is_discrete=is_discrete)
+
+    return env, env_spec

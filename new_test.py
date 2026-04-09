@@ -1,42 +1,26 @@
-import os
-import json
-import torch
-import numpy as np
-import time
-import mujoco
-import mujoco.viewer
-
 from env.go2_env import Go2Env
-from env.normalizer import StateNormalizer
-from env.tasks.self_righting_task import SelfRightingTask
-from tpe.tpe_module import TPEModule
 from control.self_righting.time_based_solution.time_based_scheduler import SchedulerTB
+from env.tasks.self_righting_task import SelfRightingTask
+from env.env_factory import create_env
+from es_framework.core.env_config import EnvConfig
 
-MAX_INT = 3000
+env_config = EnvConfig(env_class=Go2Env,
+                       controller_class=SchedulerTB,
+                       task_class=SelfRightingTask,
+                       scene_path="sim/assets/unitree_go2/scene.xml",
+                       urdf_path="sim/assets/unitree_go2/go2.urdf",
+                       tpe_model_path="tpe_model.pt",
+                       normalizer_params={
+                           "joint_limits": 1,
+                           "torque_limits": 1
+                       },
+                       render=True)
 
 
-def main():
+def main(_env_config):
 
-    model = mujoco.MjModel.from_xml_path("sim/assets/unitree_go2/scene.xml")
-    data = mujoco.MjData(model)
+    env, env_spec = create_env(_env_config)
 
-    controller = SchedulerTB()
-    normalizer = StateNormalizer(joint_limits=1, torque_limits=1)
-    tpe = TPEModule(model_path="tpe_model.pt")
-
-    task = SelfRightingTask(normalizer=normalizer, tpe=tpe)
-
-    viewer = mujoco.viewer.launch_passive(model, data)
-    config = {
-        "urdf_path": "sim/assets/unitree_go2/go2.urdf",
-        "mj_model": model,
-        "mj_data": data,
-        "controller": controller,
-        "task": task,
-        "viewer": viewer
-    }
-
-    env = Go2Env(max_step=MAX_INT, **config)
     action = 2
     tick = 0
     total_reward = 0
@@ -49,6 +33,8 @@ def main():
 
         end_sim = terminated or truncated
         tick += 1
+    env.close()
+    print(f"Total reward: {total_reward}")
 
 
 def dummy_rule(tick):
@@ -72,5 +58,25 @@ def dummy_rule(tick):
     return action
 
 
+def debug_rgc(tick):
+
+    if tick < 20:
+        action = 0
+    elif tick < 150:
+        action = 1  # go_safe
+    elif tick < 150 + 250:
+        action = 2  # prepare_cw
+    elif tick < 150 + 250 + 150:
+        action = 3  # roll_cw
+    elif tick < 150 + 250 + 150 + 250:
+        action = 4  # landing_cw
+    elif tick < 150 + 250 + 150 + 250 + 270:
+        action = 5  # prone
+    elif tick < 150 + 250 + 150 + 250 + 270 + 300:
+        action = 6  # standing_up
+    else:
+        action = 0
+
+
 if __name__ == "__main__":
-    main()
+    main(env_config)

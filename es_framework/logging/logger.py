@@ -1,184 +1,167 @@
-import os
-import csv
 import json
 import time
 from datetime import datetime
-from pathlib import Path
-from typing import List, Tuple, Dict, Optional, Any
+from typing import Dict, Any, Optional
 
 import numpy as np
-import torch
-from tqdm import tqdm
+from pathlib import Path
 
-# Conditional import for TensorBoard
 try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:
     SummaryWriter = None
 
-from es_framework.components.nn_utils import unflatten_nn_parameters
-
 
 class TrainingLogger:
 
-    def __init__(self, config: Dict[str, Any], root_dir: str = "results", periodic_interval: int = 10):
+    def __init__(self, run_dir: str):
         """
-        Unified Logger for Go2 Self-Righting.
-        Creates a single folder per run containing models, logs, and config.
+        Args:
+            run_dir: diretório da run (definido pelo Trainer)
         """
-        self.alg = config.get('optimizer_type', 'ES')
-        self.job_name = config.get('job_name', 'go2_sr')
-        self.periodic_interval = periodic_interval
+
+        self.run_dir = Path(run_dir)
+
+        # -----------------------------
+        # Create directories
+        # -----------------------------
+        self.log_dir = self.run_dir / "logs"
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        self.tb_dir = self.log_dir / "tb"
+        self.tb_dir.mkdir(parents=True, exist_ok=True)
+
+        # -----------------------------
+        # Time tracking
+        # -----------------------------
         self.start_time = time.time()
         self.last_gen_time = self.start_time
 
-        # --- 1. Create Unified Run Directory ---
-        time_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.run_id = f"{self.job_name}_{self.alg}_{time_str}"
-        self.base_path = Path(root_dir) / self.run_id
-
-        self.model_dir = self.base_path / "models"
-        self.tb_dir = self.base_path / "tensorboard"
-
-        self.model_dir.mkdir(parents=True, exist_ok=True)
-        self.tb_dir.mkdir(parents=True, exist_ok=True)
-
-        # --- 2. Save Config as JSON ---
-        self._save_config(config)
-
-        # --- 3. TensorBoard Setup ---
+        # -----------------------------
+        # TensorBoard
+        # -----------------------------
         self.tb_writer = None
         if SummaryWriter:
             self.tb_writer = SummaryWriter(log_dir=str(self.tb_dir))
 
-        # --- 4. CSV Setup ---
-        self.csv_path = self.base_path / "history.csv"
-        self.csv_file = None
-        self.csv_writer = None
-        self.csv_fieldnames = [
-            "generation", "timestamp", "duration", "fitness_best", "fitness_mean", "success_rate", "difficulty",
-            "sigma", "max_stage_reached", "eta"
-        ]
+        # -----------------------------
+        # JSON log
+        # -----------------------------
+        self.log_path = self.log_dir / "training_log.jsonl"
 
-        # --- 5. State ---
-        self.overall_best_fitness = -np.inf
-        self.reference_model = None
+        # -----------------------------
+        # State
+        # -----------------------------
+        self.global_best = -np.inf
 
-    def set_reference_model(self, model: torch.nn.Module):
-        self.reference_model = model
+    # ----------------------------------------
+    def log_generation(
+        self,
+        generation: int,
+        fitness: np.ndarray,
+        population: Optional[np.ndarray],
+        optimizer_metrics: Dict[str, float],
+        extra_metrics: Optional[Dict[str, float]] = None,
+    ):
 
-    def log_generation(self,
-                       generation: int,
-                       evaluated_population: List[Tuple[np.ndarray, float]],
-                       optimizer: Any,
-                       normalization_stats: Optional[Any] = None,
-                       extra_metrics: Optional[Dict[str, float]] = None):
-        if not evaluated_population:
-            return
+        now = time.time()
 
-        current_time = time.time()
-        duration = current_time - self.last_gen_time
-        self.last_gen_time = current_time
+        duration = now - self.last_gen_time
+        total_time = now - self.start_time
+        self.last_gen_time = now
 
-        fitnesses = [score for _, score in evaluated_population]
-        best_gen_fitness = np.max(fitnesses)
-        best_gen_params = evaluated_population[np.argmax(fitnesses)][0]
-
+        # ----------------------------------------
+        # FITNESS STATS
+        # ----------------------------------------
         stats = {
             "generation": generation,
             "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "duration": round(duration, 2),
-            "fitness_best": round(best_gen_fitness, 4),
-            "fitness_mean": round(np.mean(fitnesses), 4),
-            "overall_best": round(max(self.overall_best_fitness, best_gen_fitness), 4)
+            "duration": float(duration),
+            "total_time": float(total_time),
+            "fitness_mean": float(np.mean(fitness)),
+            "fitness_max": float(np.max(fitness)),
+            "fitness_min": float(np.min(fitness)),
+            "fitness_std": float(np.std(fitness)),
         }
 
+        # Global best
+        self.global_best = max(self.global_best, stats["fitness_max"])
+        stats["fitness_global_best"] = float(self.global_best)
+
+        # ----------------------------------------
+        # POPULATION DIVERSITY
+        # ----------------------------------------
+        if population is not None:
+            try:
+                pop_std = np.mean(np.std(population, axis=0))
+                stats["param_std"] = float(pop_std)
+            except Exception:
+                pass
+
+        # ----------------------------------------
+        # OPTIMIZER METRICS
+        # ----------------------------------------
+        if optimizer_metrics:
+            stats.update(optimizer_metrics)
+
+        # ----------------------------------------
+        # EXTRA METRICS
+        # ----------------------------------------
         if extra_metrics:
             stats.update(extra_metrics)
 
-        # Check for new overall best
-        if best_gen_fitness > self.overall_best_fitness:
-            self.overall_best_fitness = best_gen_fitness
-            self.save_checkpoint("best_overall.pth", best_gen_params, normalization_stats, optimizer, generation)
+        # ----------------------------------------
+        # SAVE JSONL
+        # ----------------------------------------
+        with open(self.log_path, "a") as f:
+            f.write(json.dumps(stats) + "\n")
 
-        # Periodic checkpoint
-        if generation % self.periodic_interval == 0:
-            self.save_checkpoint(f"gen_{generation:04d}.pth", best_gen_params, normalization_stats, optimizer,
-                                 generation)
-
-        # --- PERSIST TO CSV ---
-        self._write_csv(stats)
-
-        # --- TENSORBOARD LOGGING (With Grouping Fixes) ---
+        # ----------------------------------------
+        # TENSORBOARD
+        # ----------------------------------------
         if self.tb_writer:
             for k, v in stats.items():
                 try:
-                    # Force conversion to float for NumPy/Tensor/Scalar compatibility
                     val = float(v)
 
-                    # Logic-based grouping for cleaner UI
                     if "fitness" in k:
                         tag = f"Fitness/{k.replace('fitness_', '')}"
-                    elif "sigma" in k:
-                        tag = f"Optimizer/Sigma"
-                    elif "stage_dist" in k:
-                        # Puts stage_dist/0_go_safe etc. into a "Stages" folder
-                        tag = f"Stages/{k.split('/')[-1]}"
-                    elif k in ["success_rate", "difficulty", "max_stage_reached"]:
+
+                    elif k == "param_std":
+                        tag = "Population/std"
+
+                    elif "sigma" in k or "step" in k:
+                        tag = f"Optimizer/{k}"
+
+                    elif "time" in k or "duration" in k:
+                        tag = f"Timing/{k}"
+
+                    elif "num_" in k:
+                        tag = f"System/{k}"
+
+                    elif k in ["difficulty", "success_rate", "max_stage_reached"]:
                         tag = f"Curriculum/{k}"
+
                     else:
                         tag = f"Metrics/{k}"
 
                     self.tb_writer.add_scalar(tag, val, generation)
+
                 except (TypeError, ValueError):
-                    # Skips timestamp or other non-numeric strings
                     continue
 
-    def save_checkpoint(self, filename: str, params: np.ndarray, norm_stats: Any, optimizer: Any, gen: int):
-        if self.reference_model is None:
-            return
+        # ----------------------------------------
+        # CONSOLE
+        # ----------------------------------------
+        print(f"[GEN {generation:04d}] | "
+              f"Mean: {stats['fitness_mean']:.3f} | "
+              f"Max: {stats['fitness_max']:.3f} | "
+              f"Std: {stats['fitness_std']:.3f} | "
+              f"Time: {duration:.2f}s")
 
-        save_path = self.model_dir / filename
-        state_dict = unflatten_nn_parameters(params, self.reference_model)
-
-        if hasattr(norm_stats, 'mean'):
-            norm_data = {'mean': norm_stats.mean, 'var': norm_stats.var}
-        else:
-            norm_data = norm_stats if norm_stats else {}
-            norm_data = None
-
-        checkpoint = {
-            'generation': gen,
-            'model_state_dict': state_dict,
-            'optimizer_state': {
-                'mean': optimizer.mean,
-                'sigma': optimizer.sigma
-            },
-            'normalizer_state': norm_data
-        }
-        torch.save(checkpoint, save_path)
-
-    def _save_config(self, config: Dict):
-        with open(self.base_path / "config.json", 'w') as f:
-            json.dump(config, f, indent=4)
-
-    def _write_csv(self, stats: Dict):
-        if self.csv_file is None:
-            # Dynamically add any extra metrics to CSV header
-            for k in stats.keys():
-                if k not in self.csv_fieldnames:
-                    self.csv_fieldnames.append(k)
-            self.csv_file = open(self.csv_path, 'w', newline='')
-            self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=self.csv_fieldnames)
-            self.csv_writer.writeheader()
-
-        row = {k: v for k, v in stats.items() if k in self.csv_fieldnames}
-        self.csv_writer.writerow(row)
-        self.csv_file.flush()
-
+    # ----------------------------------------
     def close(self):
-        if self.csv_file:
-            self.csv_file.close()
         if self.tb_writer:
             self.tb_writer.close()
-        tqdm.write(f"\n[Logger] Results saved at: {self.base_path}")
+
+        print(f"\n[Logger] Results saved at: {self.run_dir}")

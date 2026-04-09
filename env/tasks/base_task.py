@@ -10,6 +10,10 @@ class BaseTask(ABC):
         self._features = None
         self.state_copy = None
         self.obs_dim = -1
+        self.difficulty = 1
+
+    def set_difficulty(self, difficulty):
+        self.difficulty = difficulty
 
     def gen_info(self):
         return {}

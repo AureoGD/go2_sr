@@ -5,7 +5,7 @@ from sim.go2_sim import Go2Sim
 
 class Go2Env(gym.Env):
 
-    def __init__(self, env_id=None, max_step=1500, **kwargs):
+    def __init__(self, env_id=None, max_step=2000, **kwargs):
 
         super().__init__()
 
@@ -83,6 +83,9 @@ class Go2Env(gym.Env):
 
         info = self.task.gen_info()
 
+        if info["sucess_flag"] is True:
+            reward += info["sucess_extra_reward"]
+
         # --------------------------------------
 
         self.ep_reward += reward
@@ -112,3 +115,16 @@ class Go2Env(gym.Env):
         self.ep_reward = 0.0
 
         return obs, {}
+
+    def close(self):
+
+        if hasattr(self, "viewer") and self.viewer is not None:
+            try:
+                self.viewer.close()
+            except:
+                pass
+
+        # liberar referências
+        self.sim = None
+        self.mj_model = None
+        self.mj_data = None
