@@ -32,14 +32,16 @@ def build_feature(state, normalizer):
     pos_norm = normalizer.normalize_position(pos)
     dir_v, v_abs = normalizer.normalize_velocity(vel)
 
-    omega_norm = np.linalg.norm(omega)
-    dir_omega = omega / (omega_norm + eps)
-    omega_abs = np.tanh(omega_norm / (normalizer.omega_scale + eps))
+    # omega_norm = np.linalg.norm(omega)
+    # dir_omega = omega / (omega_norm + eps)
+    # omega_abs = np.tanh(omega_norm / (normalizer.omega_scale + eps))
+
+    dir_omega, omega_abs = normalizer.normalize_omega(omega)
 
     q_norm = normalizer.normalize_q(q)
     dq_norm = normalizer.compute_dq_norm(dq)
 
-    feature = np.concatenate([[alpha], pos_norm, dir_v, [v_abs], dir_omega, [omega_abs], q_norm, [dq_norm]])
+    feature = np.concatenate([[alpha], dir_v, [v_abs], dir_omega, [omega_abs], q_norm, [dq_norm]])
 
     return feature
 

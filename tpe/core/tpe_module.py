@@ -67,10 +67,10 @@ class TPEModule:
 
         self.EPS = 1e-8
 
-        print("\n TPEModule initialized:")
-        print(f"   input_dim: {self.input_dim}")
-        print(f"   num_classes: {self.num_classes}")
-        print(f"   window_size: {self.window_size}")
+        # print("\n TPEModule initialized:")
+        # print(f"   input_dim: {self.input_dim}")
+        # print(f"   num_classes: {self.num_classes}")
+        # print(f"   window_size: {self.window_size}")
 
     # ======================================================
     # RESET

@@ -78,7 +78,7 @@ env_config = EnvConfig(env_class=Go2Env,
                        task_class=SelfRightingTask,
                        scene_path="sim/assets/unitree_go2/scene.xml",
                        urdf_path="sim/assets/unitree_go2/go2.urdf",
-                       tpe_model_path="tpe_model.pt",
+                       tpe_model_path="tpe/models/tpe_cnn/best_model.pt",
                        normalizer_params={
                            "joint_limits": 1,
                            "torque_limits": 1

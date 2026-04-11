@@ -22,7 +22,7 @@ def train():
     lengths = data["lengths"]
 
     # -------------------------
-    # SPLIT POR EPISÓDIO 🔥
+    # SPLIT POR EPISÓDIO
     # -------------------------
     train_idx, val_idx = split_by_episodes(features, labels, lengths)
 
@@ -116,7 +116,17 @@ def train():
 
         if val_loss < best_val:
             best_val = val_loss
-            torch.save(model.state_dict(), os.path.join(MODEL_DIR, "best_model.pt"))
+
+            model_path = os.path.join(MODEL_DIR, "best_model.pt")
+            torch.save(model.state_dict(), model_path)
+
+            config = {"input_dim": input_dim, "num_classes": num_classes, "window_size": 20}
+
+            config_path = os.path.join(MODEL_DIR, "config.json")
+
+            import json
+            with open(config_path, "w") as f:
+                json.dump(config, f, indent=4)
 
     print("\n Done!")
 

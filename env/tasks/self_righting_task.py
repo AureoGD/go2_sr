@@ -11,7 +11,7 @@ class SelfRightingTask(BaseTask):
         self.tpe = tpe
         self.tpe_probs = None
 
-        self.obs_dim = self.tpe.probs_dim + 46
+        self.obs_dim = self.tpe.probs_dim + 49
 
         self.n_action_group = 6
         self.min_upright_height = 0.1
@@ -59,9 +59,9 @@ class SelfRightingTask(BaseTask):
 
         dir_v, v_abs = self.normalizer.normalize_velocity(rs.r_vel)
 
-        omega = self.normalizer.normalize_omega(rs.omega)
+        dir_omega, omega_abs = self.normalizer.normalize_omega(rs.omega)
 
-        alpha = self.normalizer.compute_alpha(state)
+        alpha = self.normalizer.compute_alpha(rs.epsilon)
 
         q_norm = self.normalizer.normalize_q(rs.q)
 
@@ -83,8 +83,9 @@ class SelfRightingTask(BaseTask):
             "dir_v": dir_v,
             "v_abs": v_abs,
             "alpha": alpha,
-            "omega": omega,
-            "q": q_norm,
+            "dir_omega": dir_omega,
+            "omega_abs": omega_abs,
+            "q_norm": q_norm,
             "qr_norm": qr_norm,
             "dq_norm": dq_norm,
             "dq_abs": dq_abs,
@@ -97,11 +98,11 @@ class SelfRightingTask(BaseTask):
     def get_obs(self):
 
         f = self._features
-        obs = np.concatenate([[f["alpha"]], f["dir_v"], [f["v_abs"]], [f["omega"][0]], [f["dq_abs"]], f["q"],
-                              f["qr_norm"], f["tau"], f["control_index_norm"], f["action_group_norm"],
+        obs = np.concatenate([[f["alpha"]], f["dir_v"], [f["v_abs"]], f["dir_omega"], [f["omega_abs"]], f["q_norm"],
+                              [f["dq_abs"]], f["qr_norm"], f["tau"], f["control_index_norm"], f["action_group_norm"],
                               f["controller_evolution"]])
 
-        tpe_features = obs[:19]
+        tpe_features = obs[:22]
 
         self.tpe.predict(tpe_features)
 
@@ -147,15 +148,26 @@ class SelfRightingTask(BaseTask):
 
         r -= self.WEIGHT_ORIENTATION * (1.0 - alpha)
 
-        if alpha < np.cos(np.deg2rad(30)):
-            r += self.WEIGHT_ORIENTATION
+        if alpha > 0.8:
+            r += self.WEIGHT_ORIENTATION * 8
 
         current_action_group = self.map_control_index_acion_group[current_controller_idx]
 
-        if alpha < 0 and current_action_group in [4, 5, 6]:
+        # if alpha < 0 and current_action_group in [4, 5, 6]:
+        #     r -= self.WEIGHT_BAD_ORIENTATION
+
+        # if alpha > 0 and current_action_group in [1, 2]:
+        #     r -= self.WEIGHT_BAD_ORIENTATION
+
+        phase = ps.phase
+
+        if phase == 0 and current_action_group not in [1, 2]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
-        if alpha > 0 and current_action_group in [1, 2]:
+        if phase == 1 and current_action_group not in [3, 4]:
+            r -= self.WEIGHT_BAD_ORIENTATION
+
+        if phase == 2 and current_action_group not in [5, 6]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
         if current_controller_idx == 0:

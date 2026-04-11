@@ -16,7 +16,7 @@ def build_temporal_dataset(features, labels, lengths, window=20):
         for i in range(window, L):
 
             if l[i] == -1:
-                continue  # 🔥 filtro correto
+                continue
 
             X.append(f[i - window:i])
             y.append(l[i])
