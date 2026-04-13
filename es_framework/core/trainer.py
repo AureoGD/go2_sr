@@ -1,6 +1,7 @@
 import time
 import json
 import numpy as np
+import random
 import multiprocessing as mp
 
 from tqdm import tqdm
@@ -114,8 +115,8 @@ class Trainer:
 
         ScenarioClass = self.config["scenario_generator_class"]
         generator = ScenarioClass()
-
-        return [generator.sample() for _ in range(self.num_scenarios)]
+        my_list = [5, 9, 4]
+        return [generator.sample(ch=random.choice(my_list)) for _ in range(self.num_scenarios)]
 
     # ----------------------------------------
     def _build_tasks(self, population):
@@ -140,6 +141,10 @@ class Trainer:
 
         return np.array([np.mean(fitness_dict[i]) if fitness_dict[i] else -1e6 for i in range(self.pop_size)])
 
+    def _compute_success_ratio(self, results):
+        successes = [success for _, _, _, success in results]
+        return np.mean(successes)
+
     # ----------------------------------------
     def train(self):
 
@@ -150,8 +155,8 @@ class Trainer:
         heartbeat = manager.dict()
         pool = create_pool(heartbeat)
 
-        timeout_sec = 15.0
-        startup_grace_sec = 5.0
+        timeout_sec = 5.0
+        startup_grace_sec = 15.0
 
         for gen in range(self.max_generations):
 
@@ -161,6 +166,10 @@ class Trainer:
 
             population = self.optimizer.sample()
             tasks = self._build_tasks(population)
+
+            for task in tasks:
+                task_id = task[0]
+                heartbeat[task_id] = 0.0
 
             task_map = {t[0]: t for t in tasks}
             total_tasks = len(tasks)
@@ -225,7 +234,7 @@ class Trainer:
                         if task_id in completed_results:
                             continue
 
-                        if last <= 0:
+                        if last == -1:
                             continue
 
                         if now - last > timeout_sec:
@@ -236,7 +245,7 @@ class Trainer:
                             _, ind_id, _, _, _, _ = task
 
                             # penalize
-                            completed_results[task_id] = (task_id, ind_id, -1e6, None)
+                            completed_results[task_id] = (task_id, ind_id, -1e6, 0)
 
                             pbar.update(1)
 
@@ -249,9 +258,9 @@ class Trainer:
 
                 if restart_pool:
 
-                    # ----------------------------------------
-                    # KILL POOL
-                    # ----------------------------------------
+                    # # ----------------------------------------
+                    # # KILL POOL
+                    # # ----------------------------------------
                     pool.terminate()
                     pool.join()
 
@@ -286,10 +295,11 @@ class Trainer:
             # GENERATION END
             # ----------------------------------------
             gen_time = time.time() - gen_start
-            # mean_ind_time = gen_time / self.pop_size
+            mean_ind_time = gen_time / self.pop_size
 
             results = list(completed_results.values())
             fitness = self._aggregate_fitness(results)
+            success_ratio = self._compute_success_ratio(results)
 
             self.optimizer.update(fitness)
 
@@ -309,7 +319,11 @@ class Trainer:
                                        fitness=fitness,
                                        population=population,
                                        optimizer_metrics=optimizer_metrics,
-                                       extra_metrics={"gen_time": gen_time})
+                                       extra_metrics={
+                                           "gen_time": gen_time,
+                                           "mean_ind_time": mean_ind_time,
+                                           "success_ratio": success_ratio
+                                       })
 
         pool.close()
         pool.join()

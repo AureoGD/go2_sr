@@ -36,7 +36,7 @@ def run_micro_task(task_args):
 
     task_id, ind_id, flat_params, scenario, difficulty, _ = task_args
 
-    shared_heartbeat[ind_id] = time.time()
+    shared_heartbeat[task_id] = time.time()
 
     load_flat_params_into_model(flat_params, policy_net)
 
@@ -59,23 +59,24 @@ def run_micro_task(task_args):
     while not end_sim:
 
         if step % 25 == 0:
-            shared_heartbeat[ind_id] = time.time()
+            shared_heartbeat[task_id] = time.time()
 
         with torch.no_grad():
             action, _ = policy_net.predict(obs)
 
-        obs, r, terminated, truncated, _ = env.step(action)
+        obs, r, terminated, truncated, info = env.step(action)
 
         total_reward += r
         end_sim = terminated or truncated
         step += 1
 
         # Fail-safe for now! using 100 only for testing!
-        if step > 600:
+        if step > 2100:
             # print(f"[WARN] Forced break (ind {ind_id})")
             break
 
-    shared_heartbeat[ind_id] = -1.0
+    sucess_flag = float(info["sucess_flag"])
 
-    # return ind_id, total_reward, None
-    return task_id, ind_id, total_reward, None
+    shared_heartbeat[task_id] = -1.0
+
+    return task_id, ind_id, total_reward, sucess_flag

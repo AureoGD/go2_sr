@@ -11,6 +11,8 @@ class SelfRightingTask(BaseTask):
         self.tpe = tpe
         self.tpe_probs = None
 
+        self.task_phase_difficult = 0
+
         self.obs_dim = self.tpe.probs_dim + 49
 
         self.n_action_group = 6
@@ -48,6 +50,9 @@ class SelfRightingTask(BaseTask):
 
     def set_step_limit(self, step_limit):
         self.step_limit = step_limit
+
+    def set_task_phase_difficulty(self, difficult):
+        self.task_phase_difficult = difficult
 
     def compute_features(self, state):
 
@@ -118,7 +123,7 @@ class SelfRightingTask(BaseTask):
         return obs.astype(np.float32)
 
     def evaluate_reward(self):
-        r = 0
+        r = -0.1
         f = self._features
         state = self.state_copy
         rs = state.robot
@@ -155,26 +160,17 @@ class SelfRightingTask(BaseTask):
 
         r += self.WEIGHT_ORIENTATION * alpha
 
-        # if alpha > 0.8:
-        #     r += self.WEIGHT_ORIENTATION
-
         current_action_group = self.map_control_index_acion_group[current_controller_idx]
-
-        # if alpha < 0 and current_action_group in [4, 5, 6]:
-        #     r -= self.WEIGHT_BAD_ORIENTATION
-
-        # if alpha > 0 and current_action_group in [1, 2]:
-        #     r -= self.WEIGHT_BAD_ORIENTATION
 
         phase = ps.phase
 
-        if phase == 0 and current_action_group not in [1, 2]:
+        if phase == 0 and current_action_group not in [0, 1, 2]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
-        if phase == 1 and current_action_group not in [3, 4]:
+        if phase == 1 and current_action_group not in [0, 3, 4]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
-        if phase == 2 and current_action_group not in [5, 6]:
+        if phase == 2 and current_action_group not in [0, 5, 6]:
             r -= self.WEIGHT_BAD_ORIENTATION
 
         if current_controller_idx == 0:
@@ -236,6 +232,6 @@ class SelfRightingTask(BaseTask):
         return self.get_obs()
 
     def gen_info(self):
-        info = {"sucess_flag": self.success, "sucess_extra_reward": 20}
+        info = {"sucess_flag": self.success, "sucess_extra_reward": self.task_phase_difficult * 2}
 
         return info

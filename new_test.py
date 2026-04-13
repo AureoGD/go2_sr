@@ -27,7 +27,7 @@ def main(_env_config):
     action = 2
     tick = 0
     total_reward = 0
-    scenario = scene.sample(ch=0)
+    scenario = scene.sample(ch=4)
     q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
     env.reset(q0=q0, r0=r0, b0=b0)
     end_sim = False
@@ -40,28 +40,29 @@ def main(_env_config):
 
         end_sim = terminated or truncated
         tick += 1
-        print(time.time() - time_now)
     env.close()
     print(f"Total reward: {total_reward} - Tick: {tick}")
 
 
 def dummy_rule(tick):
+    action = 0
+
     if tick < 25:
         action = 0
-    elif tick < 25 + 80:
-        action = 1
-    elif tick < 25 + 80 + 310:
-        action = 7
-    elif tick < 25 + 80 + 310 + 370:
-        action = 8
-    elif tick < 25 + 80 + 310 + 370 + 300:
-        action = 9
-    elif tick < 25 + 80 + 310 + 370 + 300 + 210:
-        action = 10
-    elif tick < 25 + 80 + 310 + 370 + 300 + 210 + 210:
+    elif tick < 25 + 210:
+        action = 5
+    elif tick < 25 + 210 + 310:
         action = 6
-    else:
-        action = 0
+    # elif tick < 25 + 80 + 310 + 370:
+    #     action = 8
+    # elif tick < 25 + 80 + 310 + 370 + 300:
+    #     action = 9
+    # elif tick < 25 + 80 + 310 + 370 + 300 + 210:
+    #     action = 10
+    # elif tick < 25 + 80 + 310 + 370 + 300 + 210 + 210:
+    #     action = 6
+    # else:
+    #     action = 0
 
     return action
 

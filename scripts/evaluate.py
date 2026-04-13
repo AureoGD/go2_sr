@@ -31,7 +31,7 @@ CLASS_MAP = {
 # ----------------------------------------
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_dir", type=str, required=True)
-parser.add_argument("--model", type=str, default="last")  # best | last | gen_x
+parser.add_argument("--model", type=str, default="best")  # best | last | gen_x
 args = parser.parse_args()
 
 RUN_DIR = args.run_dir
@@ -107,36 +107,37 @@ env, _ = create_env(env_config)
 # RUN EPISODE
 # ----------------------------------------
 scene = SelfRightingScenario()
-scenario = scene.sample(ch=5)
-q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
-obs, _ = env.reset(q0=q0, r0=r0, b0=b0)
+for _ in range(5):
+    scenario = scene.sample(ch=4)
+    q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
+    obs, _ = env.reset(q0=q0, r0=r0, b0=b0)
 
-done = False
-total_reward = 0.0
-step = 0
-time_now = time.time()
-while not done:
+    done = False
+    total_reward = 0.0
+    step = 0
+    time_now = time.time()
+    while not done:
 
-    with torch.no_grad():
-        action, _ = policy.predict(obs)
+        with torch.no_grad():
+            action, _ = policy.predict(obs)
 
-    # se ação for discreta
-    if env_spec.is_discrete:
-        action = int(action)
+        # se ação for discreta
+        if env_spec.is_discrete:
+            action = int(action)
 
-    obs, reward, terminated, truncated, _ = env.step(action)
+        obs, reward, terminated, truncated, _ = env.step(action)
 
-    total_reward += reward
-    step += 1
+        total_reward += reward
+        step += 1
 
-    done = terminated or truncated
+        done = terminated or truncated
 
-    print(f"Action: {action}, Controller evolution: {env.task.state_copy.task_state.controller_evolution}")
+        # print(f"Action: {action}, Controller evolution: {env.task.state_copy.task_state.controller_evolution}")
 
-print("\n----------------------------------")
-print(f"Episode finished")
-print(f"Steps:   {step}")
-print(f"Reward:  {total_reward:.3f}")
-print("----------------------------------\n")
+    print("\n----------------------------------")
+    print(f"Episode finished")
+    print(f"Steps:   {step}")
+    print(f"Reward:  {total_reward:.3f}")
+    print("----------------------------------\n")
 
 env.close()
