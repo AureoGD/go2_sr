@@ -99,11 +99,11 @@ class Go2Sim:
 
             self._update_robot_state_from_mujoco()
 
-            self.pin_engine.update(self.robot_state)
+            # self.pin_engine.update(self.robot_state)
 
-            self._com_quantities()
+            # self._com_quantities()
 
-            self._feet_quatities()
+            # self._feet_quatities()
 
         # --------------------------------------
         # 4. AFTER STEP

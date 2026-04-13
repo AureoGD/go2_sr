@@ -286,6 +286,7 @@ class Trainer:
             # GENERATION END
             # ----------------------------------------
             gen_time = time.time() - gen_start
+            # mean_ind_time = gen_time / self.pop_size
 
             results = list(completed_results.values())
             fitness = self._aggregate_fitness(results)

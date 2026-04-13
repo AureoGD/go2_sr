@@ -1,12 +1,11 @@
 __pycache__
 logs
-models
+
 results
 vizenv
 tpe/vizenv
-tpe/data
+tpe/data/raw
 __pycache__/
 *.pyc
-*.pt
 *.npz
 experiments/

@@ -62,8 +62,11 @@ class SelfRightingScenario(BaseTaskScenario):
             }
         }
 
-    def sample(self):
-        choice = np.random.randint(0, 10)
+    def sample(self, ch=None):
+        if ch is None:
+            choice = np.random.randint(0, 10)
+        else:
+            choice = ch
 
         # Caso 0 ou se o índice não estiver definido (ex: 6)
         if choice == 0 or choice not in self.ends_data:

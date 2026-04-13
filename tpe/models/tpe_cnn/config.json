@@ -1,0 +1,5 @@
+{
+    "input_dim": 22,
+    "num_classes": 4,
+    "window_size": 20
+}

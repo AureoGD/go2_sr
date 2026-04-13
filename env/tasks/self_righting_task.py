@@ -20,7 +20,7 @@ class SelfRightingTask(BaseTask):
 
         self.MIN_DWELL_TICKS = 100
         self.MAX_PHASE_COUNT = 15
-        self.MAX_SWITCHES = 50
+        self.MAX_SWITCHES = 15
 
         self.WEIGHT_ORIENTATION = 0.01
         self.WEIGHT_MODE_HOLD = 2.5
@@ -130,6 +130,8 @@ class SelfRightingTask(BaseTask):
         current_controller_idx = ts.controller_index
 
         if current_controller_idx != self.last_controller_idx:
+            if self.last_controller_idx != -1:
+                r -= (1 - self.last_controller_evolution) * 5
             self.last_controller_idx = current_controller_idx
             self.joint_stagnation_counter = 0
             self.stagnation_counter = 0
@@ -143,13 +145,18 @@ class SelfRightingTask(BaseTask):
             self.hth.clear()
             self.hz.clear()
 
+        if ts.controller_evolution >= 0.99:
+            r -= 0.01
+
+        self.last_controller_evolution = ts.controller_evolution
+
         if self.current_controller_tick == self.MIN_DWELL_TICKS:
             r += self.WEIGHT_MODE_HOLD
 
-        r -= self.WEIGHT_ORIENTATION * (1.0 - alpha)
+        r += self.WEIGHT_ORIENTATION * alpha
 
-        if alpha > 0.8:
-            r += self.WEIGHT_ORIENTATION * 8
+        # if alpha > 0.8:
+        #     r += self.WEIGHT_ORIENTATION
 
         current_action_group = self.map_control_index_acion_group[current_controller_idx]
 
@@ -216,6 +223,7 @@ class SelfRightingTask(BaseTask):
         self.current_controller_tick = 0
         self.total_controller_idx_changes = 0
         self.success = False
+        self.last_controller_evolution = 0
 
         self.hq.clear()
         self.hth.clear()

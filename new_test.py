@@ -4,6 +4,7 @@ from env.tasks.self_righting_task import SelfRightingTask
 from env.env_factory import create_env
 from es_framework.core.env_config import EnvConfig
 from env.tasks.self_righting_scenario import SelfRightingScenario
+import time
 
 env_config = EnvConfig(env_class=Go2Env,
                        controller_class=SchedulerTB,
@@ -26,19 +27,22 @@ def main(_env_config):
     action = 2
     tick = 0
     total_reward = 0
-    scenario = scene.sample()
+    scenario = scene.sample(ch=0)
     q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
     env.reset(q0=q0, r0=r0, b0=b0)
     end_sim = False
+    time_now = time.time()
     while not end_sim:
         action = dummy_rule(tick)
+        # action = 6
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
 
         end_sim = terminated or truncated
         tick += 1
+        print(time.time() - time_now)
     env.close()
-    print(f"Total reward: {total_reward}")
+    print(f"Total reward: {total_reward} - Tick: {tick}")
 
 
 def dummy_rule(tick):
