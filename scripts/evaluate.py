@@ -2,6 +2,7 @@ import argparse
 import json
 import torch
 import time
+import random
 import numpy as np
 
 from env.env_factory import create_env
@@ -32,6 +33,7 @@ CLASS_MAP = {
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_dir", type=str, required=True)
 parser.add_argument("--model", type=str, default="best")  # best | last | gen_x
+parser.add_argument("--difficulty", type=int, default=1)
 args = parser.parse_args()
 
 RUN_DIR = args.run_dir
@@ -106,9 +108,10 @@ env, _ = create_env(env_config)
 # ----------------------------------------
 # RUN EPISODE
 # ----------------------------------------
-scene = SelfRightingScenario()
+diff = args.difficulty
+scene = SelfRightingScenario(current_difficulty=diff)
 for _ in range(5):
-    scenario = scene.sample(ch=4)
+    scenario = scene.sample()
     q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
     obs, _ = env.reset(q0=q0, r0=r0, b0=b0)
 
@@ -132,7 +135,7 @@ for _ in range(5):
 
         done = terminated or truncated
 
-        # print(f"Action: {action}, Controller evolution: {env.task.state_copy.task_state.controller_evolution}")
+        # print(f"Action: {obs[0]}")
 
     print("\n----------------------------------")
     print(f"Episode finished")

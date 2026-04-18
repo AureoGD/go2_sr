@@ -11,6 +11,7 @@ from pathlib import Path
 from es_framework.workers.worker import init_worker, run_micro_task
 from es_framework.logging.logger import TrainingLogger
 from es_framework.models.checkpoint import ModelCheckpoint
+from env.tasks.curriculum import CurriculumManager
 
 
 # ----------------------------------------
@@ -61,7 +62,10 @@ class Trainer:
         # ----------------------------------------
         # SCENARIOS
         # ----------------------------------------
-        self.scenarios = self._build_scenarios()
+        ScenarioClass = self.config["scenario_generator_class"]
+        self.scenario_generator = ScenarioClass()
+
+        self.curriculum = CurriculumManager(self.scenario_generator)
 
         # ----------------------------------------
         # RUN DIR
@@ -111,22 +115,14 @@ class Trainer:
             raise NotImplementedError
 
     # ----------------------------------------
-    def _build_scenarios(self):
-
-        ScenarioClass = self.config["scenario_generator_class"]
-        generator = ScenarioClass()
-        my_list = [5, 9, 4]
-        return [generator.sample(ch=random.choice(my_list)) for _ in range(self.num_scenarios)]
-
-    # ----------------------------------------
-    def _build_tasks(self, population):
+    def _build_tasks(self, population, scenarios):
 
         tasks = []
         task_id = 0
 
         for ind_id, params in enumerate(population):
-            for scenario in self.scenarios:
-                tasks.append((task_id, ind_id, params, scenario, self.config.get("difficulty", 0), None))
+            for scenario in scenarios:
+                tasks.append((task_id, ind_id, params, scenario, self.scenario_generator.current_difficulty, None))
                 task_id += 1
 
         return tasks
@@ -139,7 +135,7 @@ class Trainer:
         for _, ind_id, reward, _ in results:
             fitness_dict[ind_id].append(reward)
 
-        return np.array([np.mean(fitness_dict[i]) if fitness_dict[i] else -1e6 for i in range(self.pop_size)])
+        return np.array([np.mean(fitness_dict[i]) if fitness_dict[i] else -1e5 for i in range(self.pop_size)])
 
     def _compute_success_ratio(self, results):
         successes = [success for _, _, _, success in results]
@@ -149,23 +145,27 @@ class Trainer:
     def train(self):
 
         def create_pool(heartbeat):
-            return mp.Pool(processes=self.max_workers, initializer=init_worker, initargs=(self.config, heartbeat))
+            ctx = mp.get_context("spawn")
+            return ctx.Pool(processes=self.max_workers, initializer=init_worker, initargs=(self.config, heartbeat))
 
         manager = mp.Manager()
         heartbeat = manager.dict()
         pool = create_pool(heartbeat)
 
         timeout_sec = 5.0
-        startup_grace_sec = 15.0
+        startup_grace_sec = 30.0
 
         for gen in range(self.max_generations):
 
             print(f"\n[GEN {gen}]")
 
             heartbeat.clear()
+            had_timeout = False
 
             population = self.optimizer.sample()
-            tasks = self._build_tasks(population)
+            scenarios = [self.scenario_generator.sample() for _ in range(self.num_scenarios)]
+
+            tasks = self._build_tasks(population, scenarios)
 
             for task in tasks:
                 task_id = task[0]
@@ -178,20 +178,12 @@ class Trainer:
 
             gen_start = time.time()
 
-            # ----------------------------------------
-            # DISPATCH
-            # ----------------------------------------
             futures = {pool.apply_async(run_micro_task, (task,)): task for task in tasks}
 
             pbar = tqdm(total=total_tasks, desc=f"GEN {gen}", leave=False)
 
             while len(completed_results) < total_tasks:
 
-                restart_pool = False
-
-                # ----------------------------------------
-                # CHECK COMPLETED
-                # ----------------------------------------
                 done_futs = []
 
                 for fut, task in list(futures.items()):
@@ -209,22 +201,17 @@ class Trainer:
                             completed_results[task_id] = result
 
                         except Exception as e:
-
                             print(f"[WARN] Task {task_id} failed: {e}")
 
                             _, ind_id, _, _, _, _ = task
-                            completed_results[task_id] = (task_id, ind_id, -1e6, None)
+                            completed_results[task_id] = (task_id, ind_id, -1e5, 0.0)
 
                         pbar.update(1)
                         done_futs.append(fut)
 
-                # Remove after iteration is complete
                 for fut in done_futs:
                     futures.pop(fut, None)
 
-                # ----------------------------------------
-                # WATCHDOG
-                # ----------------------------------------
                 now = time.time()
 
                 if now - gen_start > startup_grace_sec:
@@ -234,85 +221,60 @@ class Trainer:
                         if task_id in completed_results:
                             continue
 
-                        if last == -1:
+                        if last == 0.0:
                             continue
 
+                        if last == -1.0:
+                            continue
+
+                        # timeout real
                         if now - last > timeout_sec:
 
-                            print(f"[WATCHDOG] Task {task_id} timeout → restarting pool")
+                            print(f"[WATCHDOG] Task {task_id} timeout → marking as failed")
 
                             task = task_map[task_id]
                             _, ind_id, _, _, _, _ = task
 
-                            # penalize
-                            completed_results[task_id] = (task_id, ind_id, -1e6, 0)
+                            completed_results[task_id] = (task_id, ind_id, -1e5, 0.0)
 
                             pbar.update(1)
 
-                            # avoid re-trigger
                             heartbeat[task_id] = -1.0
-
-                            # RESTART POOL
-                            restart_pool = True
-                            break
-
-                if restart_pool:
-
-                    # # ----------------------------------------
-                    # # KILL POOL
-                    # # ----------------------------------------
-                    pool.terminate()
-                    pool.join()
-
-                    # ----------------------------------------
-                    # RECREATE POOL
-                    # ----------------------------------------
-                    manager = mp.Manager()
-                    heartbeat = manager.dict()
-                    pool = create_pool(heartbeat)
-
-                    # ----------------------------------------
-                    # REBUILD FUTURES (ONLY UNFINISHED TASKS)
-                    # ----------------------------------------
-                    futures = {}
-
-                    for task in tasks:
-                        task_id = task[0]
-
-                        if task_id in completed_results:
-                            continue
-
-                        fut = pool.apply_async(run_micro_task, (task,))
-                        futures[fut] = task
-
-                    continue  # back to main loop
+                            had_timeout = True
 
                 time.sleep(0.2)
 
             pbar.close()
 
-            # ----------------------------------------
-            # GENERATION END
-            # ----------------------------------------
+            if had_timeout:
+                print("[INFO] Restarting pool after generation (safe cleanup)")
+
+                pool.close()
+                pool.join()
+
+                print("[DEBUG] Pool closed")
+
+                heartbeat.clear()
+
+                print("[DEBUG] Creating new pool...")
+
+                pool = create_pool(heartbeat)
+
             gen_time = time.time() - gen_start
             mean_ind_time = gen_time / self.pop_size
 
             results = list(completed_results.values())
+
             fitness = self._aggregate_fitness(results)
             success_ratio = self._compute_success_ratio(results)
 
+            self.curriculum.update(success_ratio)
             self.optimizer.update(fitness)
 
-            # ----------------------------------------
-            # CHECKPOINT
-            # ----------------------------------------
             self.checkpoint.update(self.optimizer, gen)
             self.checkpoint.save_last(self.optimizer)
             self.checkpoint.save_periodic(self.optimizer, gen, interval=50)
 
-            # ----------------------------------------
-            # LOGGING
-            # ----------------------------------------
             optimizer_metrics = self.optimizer.get_metrics()
 
             self.logger.log_generation(generation=gen,
@@ -322,7 +284,8 @@ class Trainer:
                                        extra_metrics={
                                            "gen_time": gen_time,
                                            "mean_ind_time": mean_ind_time,
-                                           "success_ratio": success_ratio
+                                           "success_ratio": success_ratio,
+                                           "difficulty": self.scenario_generator.current_difficulty
                                        })
 
         pool.close()

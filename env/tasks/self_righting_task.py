@@ -11,8 +11,6 @@ class SelfRightingTask(BaseTask):
         self.tpe = tpe
         self.tpe_probs = None
 
-        self.task_phase_difficult = 0
-
         self.obs_dim = self.tpe.probs_dim + 49
 
         self.n_action_group = 6
@@ -32,6 +30,7 @@ class SelfRightingTask(BaseTask):
         self.WEIGHT_MPC_FAIL = 1.0
         self.WEIGHT_BAD_ORIENTATION = 1
         self.WEIGHT_IDLE = 0.1
+        self.MAX_TICK_STAGNTION = 100
 
         self.WINDOW = 20
         self.hq = deque(maxlen=self.WINDOW)
@@ -50,9 +49,6 @@ class SelfRightingTask(BaseTask):
 
     def set_step_limit(self, step_limit):
         self.step_limit = step_limit
-
-    def set_task_phase_difficulty(self, difficult):
-        self.task_phase_difficult = difficult
 
     def compute_features(self, state):
 
@@ -142,6 +138,7 @@ class SelfRightingTask(BaseTask):
             self.stagnation_counter = 0
             self.current_controller_tick = 0
             self.total_controller_idx_changes += 1
+            self.current_controller_stagnation_count = 0
 
             if current_controller_idx == 6:
                 self.bz_initial = rs.b_pos[2].copy()
@@ -151,6 +148,9 @@ class SelfRightingTask(BaseTask):
             self.hz.clear()
 
         if ts.controller_evolution >= 0.99:
+            self.current_controller_stagnation_count += 1
+
+        if self.current_controller_stagnation_count >= self.MAX_TICK_STAGNTION:
             r -= 0.01
 
         self.last_controller_evolution = ts.controller_evolution
@@ -158,7 +158,9 @@ class SelfRightingTask(BaseTask):
         if self.current_controller_tick == self.MIN_DWELL_TICKS:
             r += self.WEIGHT_MODE_HOLD
 
-        r += self.WEIGHT_ORIENTATION * alpha
+        # r += self.WEIGHT_ORIENTATION * (alpha - 0.3) / 0.7
+
+        r += self.WEIGHT_ORIENTATION * self.sigmoid_reward(alpha)
 
         current_action_group = self.map_control_index_acion_group[current_controller_idx]
 
@@ -179,6 +181,13 @@ class SelfRightingTask(BaseTask):
         self.current_controller_tick += 1
 
         return float(r)
+
+    def sigmoid_reward(self, x, a=0.3, k=10):
+        S = 1 / (1 + np.exp(-k * (x - a)))
+        S_min = 1 / (1 + np.exp(-k * (-1 + a)))
+        S_max = 1 / (1 + np.exp(-k * (1 + a)))
+        S_norm = (S - S_min) / (S_max - S_min)
+        return 2 * S_norm - 1
 
     # ======================================================
     # TERMINATION
@@ -203,9 +212,9 @@ class SelfRightingTask(BaseTask):
         if alpha > 0.95 and z > 0.1:
             self.success = True
 
-        too_many_switches = self.total_controller_idx_changes > self.MAX_SWITCHES
+        #too_many_switches = self.total_controller_idx_changes > self.MAX_SWITCHES
 
-        terminated = (self.success or too_many_switches)
+        terminated = self.success
 
         truncated = current_step >= self.step_limit
 
@@ -220,6 +229,7 @@ class SelfRightingTask(BaseTask):
         self.total_controller_idx_changes = 0
         self.success = False
         self.last_controller_evolution = 0
+        self.current_controller_stagnation_count = 0
 
         self.hq.clear()
         self.hth.clear()
@@ -232,6 +242,6 @@ class SelfRightingTask(BaseTask):
         return self.get_obs()
 
     def gen_info(self):
-        info = {"sucess_flag": self.success, "sucess_extra_reward": self.task_phase_difficult * 2}
+        info = {"sucess_flag": self.success, "sucess_extra_reward": self.difficulty * 2}
 
         return info
