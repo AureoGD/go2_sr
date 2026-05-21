@@ -10,9 +10,6 @@ from es_framework.models.policy import Policy
 from es_framework.core.env_spec import EnvSpec
 from es_framework.core.env_config import EnvConfig
 
-# ----------------------------------------
-# IMPORTS PARA MAPEAR CLASSES
-# ----------------------------------------
 from env.go2_env import Go2Env
 from control.self_righting.time_based_solution.time_based_scheduler import SchedulerTB
 from env.tasks.self_righting_task import SelfRightingTask
@@ -109,11 +106,11 @@ env, _ = create_env(env_config)
 # RUN EPISODE
 # ----------------------------------------
 diff = args.difficulty
-scene = SelfRightingScenario(current_difficulty=diff)
+scene = SelfRightingScenario(current_difficulty=2)
 for _ in range(5):
-    scenario = scene.sample()
-    q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
-    obs, _ = env.reset(q0=q0, r0=r0, b0=b0)
+    data = scene.sample()
+    print(data["options"]["task_gain"])
+    obs, _ = env.reset(options=data["options"])
 
     done = False
     total_reward = 0.0
@@ -125,10 +122,13 @@ for _ in range(5):
             action, _ = policy.predict(obs)
 
         # se ação for discreta
-        if env_spec.is_discrete:
-            action = int(action)
-
-        obs, reward, terminated, truncated, _ = env.step(action)
+        # if env_spec.is_discrete:
+        #     action = int(action)
+        if step < 200:
+            action = 5
+        else:
+            action = 6
+        obs, reward, terminated, truncated, info = env.step(action)
 
         total_reward += reward
         step += 1
@@ -136,11 +136,12 @@ for _ in range(5):
         done = terminated or truncated
 
         # print(f"Action: {obs[0]}")
-
+    flag = info["success_flag"]
     print("\n----------------------------------")
     print(f"Episode finished")
     print(f"Steps:   {step}")
     print(f"Reward:  {total_reward:.3f}")
+    print(f"{flag}")
     print("----------------------------------\n")
 
 env.close()

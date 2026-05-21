@@ -75,8 +75,8 @@ def run_micro_task(task_args):
             # print(f"[WARN] Forced break (ind {ind_id})")
             break
 
-    sucess_flag = float(info["sucess_flag"])
+    success_flag = float(info["success_flag"])
 
     shared_heartbeat[task_id] = -1.0
 
-    return task_id, ind_id, total_reward, sucess_flag
+    return task_id, ind_id, total_reward, success_flag

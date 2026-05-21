@@ -25,7 +25,7 @@ def euler_to_quat(roll, pitch, yaw):
             cx * sy * cz + sx * cy * sz,
             cx * cy * sz - sx * sy * cz,
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
 
 
@@ -37,7 +37,7 @@ def euler_to_rot(roll, pitch, yaw):
             [0, np.cos(roll), -np.sin(roll)],
             [0, np.sin(roll), np.cos(roll)],
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
 
     rot_y = np.array(
@@ -46,7 +46,7 @@ def euler_to_rot(roll, pitch, yaw):
             [0, 1, 0],
             [-np.sin(pitch), 0, np.cos(pitch)],
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
     rot_z = np.array(
         [
@@ -54,7 +54,7 @@ def euler_to_rot(roll, pitch, yaw):
             [np.sin(yaw), np.cos(yaw), 0],
             [0, 0, 1],
         ],
-        dtype=np.float64,
+        dtype=np.float32,
     )
     return rot_z @ rot_y @ rot_x
 

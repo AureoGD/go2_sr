@@ -1,3 +1,4 @@
+from sim.debug.state import DebugState
 from dataclasses import dataclass, field
 import numpy as np
 
@@ -42,3 +43,4 @@ class LowLevelState:
 class SystemState:
     robot: Go2State = field(default_factory=Go2State)
     low_level: LowLevelState = field(default_factory=LowLevelState)
+    debug: DebugState = field(default_factory=DebugState)

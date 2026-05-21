@@ -1,6 +1,8 @@
 import gymnasium as gym
 import numpy as np
 from sim.go2_sim import Go2Sim
+from sim.engine.pinocchio_engine import PinocchioEngine
+import pinocchio as pin
 
 
 class Go2Env(gym.Env):
@@ -21,14 +23,21 @@ class Go2Env(gym.Env):
         self.controller = controller
         self.task = task
 
+        urdf_path = kwargs.get("urdf_path")
+
+        root_joint = pin.JointModelFreeFlyer()
+        self.pin_model = pin.buildModelFromUrdf(urdf_path, root_joint)
+        self.pin_engine = PinocchioEngine(self.pin_model)
+
         # --------------------------------------
         # SIMULATION
         # --------------------------------------
         self.sim = Go2Sim(
-            urdf_path=kwargs.get("urdf_path"),
+            urdf_path=urdf_path,
             mj_model=kwargs.get("mj_model"),
             mj_data=kwargs.get("mj_data"),
             controller=self.controller,
+            pin_engine=self.pin_engine,
             con_dt=kwargs.get("con_dt", 0.01),
             dyn_dt=kwargs.get("dyn_dt", 0.001),
             viewer=kwargs.get("viewer", None),
@@ -81,9 +90,9 @@ class Go2Env(gym.Env):
 
         terminated, truncated = self.task.check_termination(self.current_step)
 
-        info = self.task.gen_info()
+        info = self.task.gen_info(env_id=self.env_id, step_now=self.current_step)
 
-        if info["sucess_flag"] is True:
+        if info["success_flag"] is True:
             reward += info["sucess_extra_reward"]
 
         # --------------------------------------
@@ -92,29 +101,35 @@ class Go2Env(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def reset(self, *, seed=None, q0=None, b0=None, r0=None):
+    def reset(self, seed=None, options=None):
 
-        if seed is not None:
-            np.random.seed(seed)
+        super().reset(seed=seed)
+
+        options = options or {}
+        q0 = options.get("q0")
+        b0 = options.get("b0")
+        r0 = options.get("r0")
+        diff = options.get("task_gain", 1)
 
         self.sim.reset_robot_pose(q0=q0, b0=b0, r0=r0)
 
         state = self.sim.state
         state.task_state = self.sim.controller.task_state
 
-        # reset normalizer via task
         if self.task.normalizer is not None:
             self.task.normalizer.reset_reference()
 
-        # forma correta (encapsulada)
         obs = self.task.compute_initial_obs(state)
         self.task.reset()
         self.task.set_step_limit(self.max_step)
+        self.task.set_difficulty(diff)
 
         self.current_step = 0
         self.ep_reward = 0.0
 
-        return obs, {}
+        info = {"env_id": self.env_id}
+
+        return obs, info
 
     def close(self):
 

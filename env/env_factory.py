@@ -7,7 +7,7 @@ from env.normalizer import StateNormalizer
 from tpe.core.tpe_module import TPEModule
 
 
-def create_env(env_config):
+def create_env(env_config, env_id=None):
 
     # -----------------------------
     # Mujoco
@@ -37,7 +37,8 @@ def create_env(env_config):
     # -----------------------------
     # Env
     # -----------------------------
-    env = env_config.env_class(urdf_path=env_config.urdf_path,
+    env = env_config.env_class(env_id=env_id,
+                               urdf_path=env_config.urdf_path,
                                mj_model=model,
                                mj_data=data,
                                controller=controller,

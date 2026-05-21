@@ -477,7 +477,7 @@ class BaseRGC:
         p_body_se3 = self.world_M_base.actInv(p_se3)
         return p_body_se3.translation
 
-    def feet_references(self, n, R=0.05):
+    def feet_references(self, foot_pos, contacts, n, R=0.05):
         """
         Computes swing-feet reference points in BODY coordinates.
         Uses:
@@ -489,7 +489,7 @@ class BaseRGC:
         Pr1_body, Pr2_body, Pr3_body
         """
 
-        p1, p2, p3, p4 = self.contacts  # WORLD coords
+        p1, p2, p3, p4 = contacts
 
         n = n / np.linalg.norm(n)
 
@@ -502,16 +502,11 @@ class BaseRGC:
         if (np.dot(d_perp, p1 - p2) < 0) and (np.dot(d_perp, p3 - p2) < 0):
             d_perp = -d_perp
 
-        foot_world = self.x[26:29].flatten()  # convert body state → world pos
-        foot_z = foot_world[2]
+        foot_z = foot_pos[2]
 
         Pr1_world = p2 + R * d_perp  # front target
         Pr2_world = p4 + d_rot * R / 1.5  # point ON rotation axis
         Pr2_world[2] = foot_z * 1.8
         Pr3_world = p4 + R * d_perp  # rear target
-
-        self.robot_states.pc_debug[0, :] = Pr1_world
-        self.robot_states.pc_debug[1, :] = Pr2_world
-        self.robot_states.pc_debug[2, :] = Pr3_world
 
         return Pr1_world, Pr2_world, Pr3_world

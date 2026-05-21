@@ -51,6 +51,28 @@ class PinocchioEngine:
 
                 self.frames[leg][part] = self.model.getFrameId(name)
 
+        self.leg_slices = {
+            "FR": slice(0, 3),
+            "FL": slice(3, 6),
+            "RR": slice(6, 9),
+            "RL": slice(9, 12),
+        }
+
+        self.order = [
+            3,
+            4,
+            5,  # FR
+            0,
+            1,
+            2,  # FL
+            9,
+            10,
+            11,  # RR
+            6,
+            7,
+            8  # RL
+        ]
+
         # -------------------------------
         # JOINT & TORQUE LIMITS
         # -------------------------------
@@ -63,6 +85,8 @@ class PinocchioEngine:
         self.q = None
         self.dq = None
         self.updated = False
+
+        self.robot_mass = self._total_mass()
 
     # ======================================================
     # BUILD q, dq (Unitree → Pinocchio)
@@ -111,6 +135,10 @@ class PinocchioEngine:
     def _check(self):
         if not self.updated:
             raise RuntimeError("PinocchioEngine.update() não foi chamado")
+
+    def centroidal_inertia(self):
+        self._check()
+        return self.data.Ig.inertia.copy()
 
     # ======================================================
     # REORDER (Pinocchio → Unitree)
@@ -182,7 +210,9 @@ class PinocchioEngine:
 
         J = pin.computeFrameJacobian(self.model, self.data, self.q, fid, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
 
-        return J[:, 6:]
+        J_joints = J[:, 6:]
+
+        return self.reorder_legs(J_joints.T).T
 
     # ======================================================
     # HELPERS
@@ -223,8 +253,112 @@ class PinocchioEngine:
         self.joint_limits = np.stack([joint_lower, joint_upper], axis=1)
         self.torque_limits = joint_effort
 
+    def actuated_mass_matrix(self):
+        """
+        Returns the actuated joint-space mass matrix
+        reordered to the controller/Unitree convention.
+
+        Output shape:
+            (12, 12)
+        """
+
+        # Full floating-base mass matrix
+        M_full = self.data.M.copy()
+
+        # Remove floating base (first 6 DoFs)
+        M_act = M_full[6:, 6:]
+
+        # Reorder joints from URDF/Pinocchio ordering
+        # to controller ordering
+
+        M_reordered = M_act[np.ix_(self.order, self.order)]
+
+        return M_reordered
+
+    def linear_leg_jacobian(self, leg, part):
+
+        J_frame = self.frame_jacobian(leg, part)
+
+        J_linear = J_frame[:3, :]
+
+        joint_slice = self.leg_slices[leg]
+
+        return J_linear[:, joint_slice]
+
+    def point_jacobian(self, leg_name, frame_name, point_world):
+        """
+        Returns the 3x3 linear Jacobian block evaluated
+        at an arbitrary point expressed in world coordinates.
+
+        Parameters
+        ----------
+        leg_name : str
+            Leg identifier:
+                "FR", "FL", "RR", "RL"
+
+        frame_name : str
+            Frame suffix name:
+                "foot", "calf_joint", etc.
+
+        point_world : np.ndarray shape (3,)
+            Point expressed in world coordinates.
+
+        Returns
+        -------
+        np.ndarray shape (3,3)
+            Linear Jacobian block associated with the leg.
+        """
+
+        # -------------------------------------------------
+        # Build full frame name
+        # -------------------------------------------------
+        full_frame_name = f"{leg_name}_{frame_name}"
+
+        frame_id = self.model.getFrameId(full_frame_name)
+
+        # -------------------------------------------------
+        # Get frame placement
+        # -------------------------------------------------
+        oMf = self.data.oMf[frame_id]
+
+        # Vector from frame origin to target point
+        r_vec = point_world - oMf.translation
+
+        # -------------------------------------------------
+        # Compute frame Jacobian
+        # -------------------------------------------------
+        J_frame = pin.computeFrameJacobian(self.model, self.data, self.q, frame_id, pin.LOCAL_WORLD_ALIGNED)
+
+        # Split linear/angular components
+        J_linear = J_frame[:3, :]
+        J_angular = J_frame[3:, :]
+
+        # -------------------------------------------------
+        # Point Jacobian transformation
+        # -------------------------------------------------
+        J_point = J_linear - pin.skew(r_vec) @ J_angular
+
+        # Remove floating base
+        J_point = J_point[:, 6:]
+
+        # -------------------------------------------------
+        # Reorder to controller convention
+        # -------------------------------------------------
+
+        J_point = J_point[:, self.order]
+
+        # -------------------------------------------------
+        # Return only desired leg block
+        # -------------------------------------------------
+        joint_slice = self.leg_slices[leg_name]
+
+        return J_point[:, joint_slice]
+
     def get_joint_limits(self):
         return self.joint_limits.copy()
 
     def get_torque_limits(self):
         return self.torque_limits.copy()
+
+    def _total_mass(self):
+        return pin.computeTotalMass(self.model)

@@ -4,7 +4,91 @@ from env.tasks.self_righting_task import SelfRightingTask
 from env.env_factory import create_env
 from es_framework.core.env_config import EnvConfig
 from env.tasks.self_righting_scenario import SelfRightingScenario
+from guided_mutation.es_framework.models.policy import Policy
+import numpy as np
 import time
+import random
+
+import pickle
+import os
+
+with open("/home/CCT/9791086/mujoco_sr/failed_tasks/failed_task_3.pkl", "rb") as f:
+    data = pickle.load(f)
+
+params = data[3]
+options = data[4]
+
+config = {
+
+    # -----------------------------
+    # Experiment
+    # -----------------------------
+    "job_name": "go2_self_righting",
+
+    # -----------------------------
+    # Optimizer
+    # -----------------------------
+    "optimizer_type": "CEM",
+
+    # -----------------------------
+    # Population Training
+    # -----------------------------
+    "pop_size": 5,
+    "species_size": 1,
+    "num_scenarios": 5,
+    "max_generations": 1000,
+    "max_workers": 15,
+    "max_steps": 1000,
+
+    # -----------------------------
+    # ES params
+    # -----------------------------
+    "sigma_init": 0.05,
+    "sigma_decay": 0.995,
+    "elite_frac": 0.2,
+
+    # -----------------------------
+    # RL params
+    # -----------------------------
+    "rl_steps": 1000,
+    "batch_size": 256,
+    "gamma": 0.99,
+    "epsilon": 0.2,
+
+    # -----------------------------
+    # V-guided exploration
+    # -----------------------------
+    "delta_v": 20.0,
+    "epsilon_boost": 1.3,
+    "epsilon_max": 0.6,
+    "v_policy": {
+        "window_size": 10,
+        "batch_size": 256
+    },
+
+    # -----------------------------
+    # Model
+    # -----------------------------
+    "model_config": {
+        "layers": [
+            {
+                "units": 64,
+                "activation": "tanh"
+            },
+            {
+                "units": 64,
+                "activation": "tanh"
+            },
+        ]
+    },
+
+    # -----------------------------
+    # Difficulty (task-level)
+    # -----------------------------
+    "difficulty": 0,
+    "env_config": None,
+    "scenario_generator_class": None,
+}
 
 env_config = EnvConfig(env_class=Go2Env,
                        controller_class=SchedulerTB,
@@ -23,25 +107,38 @@ def main(_env_config):
 
     env, env_spec = create_env(_env_config)
     scene = SelfRightingScenario()
+    policy = Policy(env_spec, config["model_config"])
+    policy.set_parameters(params)
 
-    action = 2
-    tick = 0
-    total_reward = 0
-    scenario = scene.sample(ch=4)
-    q0, r0, b0 = scenario["q0"], scenario["r0"], scenario["b0"]
-    env.reset(q0=q0, r0=r0, b0=b0)
-    end_sim = False
-    time_now = time.time()
-    while not end_sim:
-        action = dummy_rule(tick)
-        # action = 6
-        obs, reward, terminated, truncated, info = env.step(action)
-        total_reward += reward
+    for i in range(100):
+        tick = 0
+        total_reward = 0
+        # options = scene.sample()
+        # options = {
+        #     'q0': np.array([-0., 1.41, -2.72, -0.02, 1.4, -2.72, -0.02, 1.44, -2.73, -0.01, 1.39, -2.73]),
+        #     'r0': np.array([0.01, -0.02, 1.7473776]),
+        #     'b0': np.array([-0.99161911, -0.76641263, 0.18])
+        # }
+        st, _ = env.reset(options=options)
+        end_sim = False
+        time_now = time.time()
+        while not end_sim:
 
-        end_sim = terminated or truncated
-        tick += 1
-    env.close()
-    print(f"Total reward: {total_reward} - Tick: {tick}")
+            action, _ = policy.predict(st)
+            obs, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
+
+            end_sim = terminated or truncated
+            tick += 1
+            st = obs
+            if (tick % 200 == 0):
+                print("Doing something")
+
+        print(f"Scenario: {i+1} - Tick: {tick}")
+
+    del policy
+
+    policy = Policy(env_spec, config["model_config"])
 
 
 def dummy_rule(tick):

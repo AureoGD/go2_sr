@@ -35,7 +35,6 @@ class SchedulerTB(BaseSelfRighting):
 
         self.task_state = TimeBasedState()
 
-        # Remove parâmetros que não devem ser propagados
         self._base_kwargs = {k: v for k, v in kwargs.items() if k not in ["robot_states", "seed"]}
 
         kp = kwargs.get("kp", 50.0)

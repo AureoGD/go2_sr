@@ -1,10 +1,10 @@
 import numpy as np
 import mujoco
-import pinocchio as pin
 
 from sim.state import SystemState
 from sim.engine.pinocchio_engine import PinocchioEngine
 from sim.utils.transforms import euler_to_quat, quat_to_euler
+from sim.debug.debug_visualization import DebugVisualizer
 
 
 class Go2Sim:
@@ -12,7 +12,7 @@ class Go2Sim:
     # ======================================================
     # INIT
     # ======================================================
-    def __init__(self, urdf_path, mj_model, mj_data, controller=None, con_dt=0.01, dyn_dt=0.001, viewer=None):
+    def __init__(self, mj_model, mj_data, controller=None, pin_engine=None, con_dt=0.01, dyn_dt=0.001, viewer=None):
 
         # -------------------------------
         # MuJoCo
@@ -26,13 +26,12 @@ class Go2Sim:
         self.state = SystemState()
         self.robot_state = self.state.robot
         self.low_level_state = self.state.low_level
+        self.debug_state = self.state.debug
 
         # -------------------------------
         # PINOCCHIO
         # -------------------------------
-        root_joint = pin.JointModelFreeFlyer()
-        self.pin_model = pin.buildModelFromUrdf(urdf_path, root_joint)
-        self.pin_engine = PinocchioEngine(self.pin_model)
+        self.pin_engine = pin_engine
 
         # -------------------------------
         # CONTROLLER
@@ -63,6 +62,8 @@ class Go2Sim:
         # -------------------------------
         self.viewer = viewer
         self._is_render = viewer is not None
+
+        self.debug_viz = DebugVisualizer(self.viewer)
 
         # -------------------------------
         # INTERNAL
@@ -139,6 +140,12 @@ class Go2Sim:
         dq = self.robot_state.dq
         qr = self.low_level_state.qr
 
+        if not np.isfinite(q).all():
+            raise RuntimeError("q inválido antes do gravity")
+
+        if not np.isfinite(dq).all():
+            raise RuntimeError("dq inválido antes do gravity")
+
         KP = self.low_level_state.Kp
         KD = self.low_level_state.Kd
 
@@ -149,6 +156,10 @@ class Go2Sim:
         tau_g = self.pin_engine.gravity()
 
         tau = tau_pd + tau_g
+
+        if not np.isfinite(tau).all():
+            raise RuntimeError("Torque inválido")
+
         self.low_level_state.tau_pd = tau_pd
         self.low_level_state.tau_g = tau_g
         self.low_level_state.tau = tau
@@ -159,8 +170,18 @@ class Go2Sim:
     # PHYSICS
     # ======================================================
     def _physics(self, tau):
+        if not np.isfinite(tau).all():
+            raise RuntimeError("Torque inválido (NaN/Inf)")
+
         self.mj_data.ctrl[:] = tau
+
         mujoco.mj_step(self.mj_model, self.mj_data)
+
+        if not np.isfinite(self.mj_data.qpos).all():
+            raise RuntimeError("Estado inválido após mj_step (qpos)")
+
+        if not np.isfinite(self.mj_data.qvel).all():
+            raise RuntimeError("Estado inválido após mj_step (qvel)")
 
     # ======================================================
     # UPDATE STATE FROM MUJOCO
@@ -195,6 +216,16 @@ class Go2Sim:
 
         base_pos = self.robot_state.b_pos
         self.viewer.cam.lookat[:] = base_pos
+
+        # ---------------------------
+        # ADD THIS BLOCK
+        # ---------------------------
+        if self.debug_viz is not None:
+
+            self.debug_viz.render(self.debug_state.sw_foot_data)
+
+        self.viewer.sync()
+
         self.viewer.sync()
 
     # ======================================================

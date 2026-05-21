@@ -41,8 +41,13 @@ class SelfRightingTask(BaseTask):
         self.BODY_PROGRESS_ACTION_GROUP = {3, 5, 6}
         self.JOINT_PROGRESS_ACTION_GROUP = {1, 2, 4}
 
+        self.difficulty = 1
+
     def get_obs_dim(self):
         return self.obs_dim
+
+    def set_difficulty(self, difficulty):
+        self.difficulty = difficulty
 
     def get_tpe_probs(self):
         return self.tpe_probs
@@ -119,7 +124,7 @@ class SelfRightingTask(BaseTask):
         return obs.astype(np.float32)
 
     def evaluate_reward(self):
-        r = -0.1
+        r = -0.01
         f = self._features
         state = self.state_copy
         rs = state.robot
@@ -158,8 +163,6 @@ class SelfRightingTask(BaseTask):
         if self.current_controller_tick == self.MIN_DWELL_TICKS:
             r += self.WEIGHT_MODE_HOLD
 
-        # r += self.WEIGHT_ORIENTATION * (alpha - 0.3) / 0.7
-
         r += self.WEIGHT_ORIENTATION * self.sigmoid_reward(alpha)
 
         current_action_group = self.map_control_index_acion_group[current_controller_idx]
@@ -176,9 +179,11 @@ class SelfRightingTask(BaseTask):
             r -= self.WEIGHT_BAD_ORIENTATION
 
         if current_controller_idx == 0:
-            r -= self.WEIGHT_IDLE
+            r -= self.WEIGHT_IDLE * 5
 
         self.current_controller_tick += 1
+
+        self.cumulative_r += r
 
         return float(r)
 
@@ -212,8 +217,6 @@ class SelfRightingTask(BaseTask):
         if alpha > 0.95 and z > 0.1:
             self.success = True
 
-        #too_many_switches = self.total_controller_idx_changes > self.MAX_SWITCHES
-
         terminated = self.success
 
         truncated = current_step >= self.step_limit
@@ -230,6 +233,7 @@ class SelfRightingTask(BaseTask):
         self.success = False
         self.last_controller_evolution = 0
         self.current_controller_stagnation_count = 0
+        self.cumulative_r = 0
 
         self.hq.clear()
         self.hth.clear()
@@ -241,7 +245,12 @@ class SelfRightingTask(BaseTask):
         self.compute_features(state)
         return self.get_obs()
 
-    def gen_info(self):
-        info = {"sucess_flag": self.success, "sucess_extra_reward": self.difficulty * 2}
+    def gen_info(self, env_id, step_now):
+        info = {
+            "env_id": env_id,
+            "success_flag": self.success,
+            "sucess_extra_reward": self.difficulty * 2,
+            "sim_step": step_now
+        }
 
         return info
