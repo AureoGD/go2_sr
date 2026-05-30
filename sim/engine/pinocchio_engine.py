@@ -285,6 +285,16 @@ class PinocchioEngine:
 
         return J_linear[:, joint_slice]
 
+    def angular_leg_jacobian(self, leg, part):
+
+        J_frame = self.frame_jacobian(leg, part)
+
+        J_linear = J_frame[3:, :]
+
+        joint_slice = self.leg_slices[leg]
+
+        return J_linear[:, joint_slice]
+
     def point_jacobian(self, leg_name, frame_name, point_world):
         """
         Returns the 3x3 linear Jacobian block evaluated

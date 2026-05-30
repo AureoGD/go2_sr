@@ -20,7 +20,6 @@ class LandingCW(BaseRGCController):
         self.N = 20
         self.M = 10
         self.ts = 0.01
-        self.ws = 10
 
         # Number of states, inputs, outputs and constarints
         self.nx = 29
@@ -56,10 +55,10 @@ class LandingCW(BaseRGCController):
         # Weights
         # ----------------------------------------
 
-        Qr = np.diag(np.array([1, 1, 1]))  # FR and RR joints
-        Qeps = np.diag(np.array([1, 1, 1, 1]))  # Quaternions
-        Qposfl = np.diag(np.array([4, 2, 4]))  # FL foot (P1)
-        Qposrl = np.diag(np.array([8, 8, 4]))  # RL foot (P2)
+        Qr = 10 * np.diag(np.array([1, 1, 1]))  # FR and RR joints
+        Qeps = 0.0000000001 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
+        Qposfl = 0.8 * np.diag(np.array([4, 2, 4]))  # FL foot (P1)
+        Qposrl = 0.8 * np.diag(np.array([8, 8, 4]))  # RL foot (P2)
 
         Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl)
         self.Q = block_diag(*[Q] * self.N)
@@ -70,16 +69,15 @@ class LandingCW(BaseRGCController):
         self.idx_RL2 = slice(16, 19)  # = 16:19
 
         # Update control action weight matrix
-        Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrfl = 0.9 * np.diag(np.array([0.9, 1, 1]))
-        Rdqrr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrl = 1.5 * np.diag(np.array([1, 1, 1]))
+        Rdqrfr = 1000 * np.diag(np.array([1, 1, 1]))
+        Rdqrfl = 40 * np.diag(np.array([1, 1, 1]))
+        Rdqrr = 1000 * np.diag(np.array([1, 1, 1]))
+        Rdqrl = 40 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
 
         # reference
-
         self.qr = np.array([0.4, 1.5, -2.0, 0.4, 1.5, -2.0]).reshape(6, 1)
 
         self.Jinv = np.zeros((12, 12), dtype=np.float32)
@@ -90,7 +88,7 @@ class LandingCW(BaseRGCController):
 
         self.first_int = True
 
-        self.leg_trajectory = SwingFootPlanner()
+        self.leg_path = SwingFootPlanner(bezier_mode=True)
         # ----------------------------------------
         # Low-level mode controller gains
         # ----------------------------------------
@@ -115,14 +113,24 @@ class LandingCW(BaseRGCController):
 
         mean_pivot = 0.5 * (pivot_fr + pivot_rr)
 
+        J_pivot_front = self.pin_engine.linear_leg_jacobian('FR', "hip")
+        J_pivot_rear = self.pin_engine.linear_leg_jacobian('RR', "hip")
+
         Jc = np.zeros((12, 12))
         Sa = np.zeros((12, 3))
 
-        pivot_map = {
+        pivot_map_pos = {
             "FR": pivot_fr,
             "FL": None,  # <-swing leg
             "RR": pivot_rr,
             "RL": None,  # <-swing leg
+        }
+
+        pivot_map_jac = {
+            "FR": J_pivot_front,
+            "FL": J_pivot_front,
+            "RR": J_pivot_rear,
+            "RL": J_pivot_rear,
         }
 
         foot_positions = {}
@@ -135,7 +143,7 @@ class LandingCW(BaseRGCController):
 
             foot_positions[leg] = foot
 
-            pivot = pivot_map[leg]
+            pivot = pivot_map_pos[leg]
 
             if pivot is not None:
                 Sa[3 * i:3 * (i + 1), :] = self.skew_symmetric_matrix(foot - pivot)
@@ -166,7 +174,7 @@ class LandingCW(BaseRGCController):
         gamma_a_star = inv_gamma @ Sa
         gamma_q_star = inv_gamma @ Lambda_swing
 
-        self.Jinv = np.linalg.inv(Jc.T)
+        self.Jinv = np.linalg.inv(gamma.T)
 
         I_com = self.pin_engine.centroidal_inertia()
         mass = self.total_mass
@@ -181,44 +189,44 @@ class LandingCW(BaseRGCController):
         comp_grav = S @ np.array([0, 0, mass])
         term_grav = I_inv @ comp_grav
 
-        k3 = I_inv @ gamma_a_star.T @ self.Kp_mtx
-        k4 = I_inv @ gamma_a_star.T @ self.Kd_mtx
+        k1 = self.Kp_mtx - self.Kd_mtx @ gamma_q_star
+        k2 = self.Kd_mtx @ gamma_a_star
+
+        k3 = I_inv @ Sa.T @ self.Jinv
 
         J_fl = self.pin_engine.linear_leg_jacobian('FL', 'foot')
-        Lambda_fl = Lambda[3:6, 3:6]
 
         J_rl = self.pin_engine.linear_leg_jacobian('RL', 'foot')
-        Lambda_rl = Lambda[9:12, 9:12]
 
-        self.A[0:3, 0:3] = -k4 @ gamma_a_star
-        self.A[0:3, 3:15] = -k3
+        self.A[0:3, 0:3] = -k3 @ k2
+        self.A[0:3, 3:15] = -k3 @ k1
         self.A[0:3, 22] = term_grav
 
         self.A[3:15, 0:3] = gamma_a_star
         self.A[3:15, 3:15] = -gamma_q_star
 
-        self.A[15:18, 0:3] = -S + J_com @ gamma_a_star
+        self.A[15:18, 0:3] = J_com @ gamma_a_star
+        self.A[15:18, 3:15] = -J_com @ gamma_q_star
 
         self.A[18:22, 0:3] = T.reshape(4, 3)
 
-        self.A[23:26, 3:6] = -J_fl @ Lambda_fl
-        self.A[26:29, 9:12] = -J_rl @ Lambda_rl
+        self.A[23:26, 6:9] = -J_fl @ Lambda[3:6, 3:6]
 
-        self.B[0:3, :] = k3
+        self.A[26:29, 12:15] = -J_rl @ Lambda[9:12, 9:12]
+
+        self.B[0:3, :] = k3 @ k1
+
+        self.B[3:15, :] = gamma_q_star
+
+        self.B[15:18, :] = J_com @ gamma_q_star
+
+        self.B[23:26, 3:6] = J_fl @ Lambda[3:6, 3:6]
+        self.B[26:29, 9:12] = J_rl @ Lambda[9:12, 9:12]
 
         self.Aa[0:self.nx, 0:self.nx] = np.identity(self.nx) + self.ts * self.A
         self.Aa[0:self.nx, self.nx:] = self.ts * self.B
 
         self.Ba[0:self.nx, :] = self.ts * self.B
-
-        self.Ba[6:9, 3:6] = self.ts * np.eye(3)
-        self.Ba[12:15, 9:12] = self.ts * np.eye(3)
-
-        self.Ba[15:18, 3:6] = J_com[:, 3:6]
-        self.Ba[15:18, 9:12] = J_com[:, 9:]
-
-        self.Aa[23:26, 26:29] = self.ts * J_fl @ Lambda_fl
-        self.Aa[26:29, 32:35] = self.ts * J_rl @ Lambda_rl
 
         foot_fl = self.pin_engine.frame_pos('FL', 'foot')
         foot_rl = self.pin_engine.frame_pos('RL', 'foot')
@@ -249,7 +257,10 @@ class LandingCW(BaseRGCController):
         if self.first_int:
             n, _ = plane_normal(self.contacts)
 
-            fl_ref, rl_ref = self.leg_trajectory.update_geometry(sw_foot_pos, self.contacts, n, 0.20)
+            self.leg_path.update_geometry(sw_foot_pos, self.contacts, n, 0.30)
+
+            fl_ref = self.leg_path.get_front_reference()
+            rl_ref, _ = self.leg_path.get_rear_reference(sw_foot_pos)
 
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
@@ -259,9 +270,9 @@ class LandingCW(BaseRGCController):
                                                                                            1), rl_ref.reshape(-1, 1)))
             self.ref = np.tile(ref, (self.N, 1))
         else:
-            rl_ref, _ = self.leg_trajectory.evaluate(sw_foot_pos)
+            rl_ref, _ = self.leg_path.get_rear_reference(sw_foot_pos)
             self.ref.reshape(self.N, self.ny)[:, 13:] = rl_ref.reshape(1, 3)
 
-        self.dg.sw_foot_data[0, :] = self.leg_trajectory.p_mid_inter.reshape(1, 3)
-        self.dg.sw_foot_data[1, :] = self.leg_trajectory.p_rear_final.reshape(1, 3)
+        self.dg.sw_foot_data[0, :] = self.leg_path.p_mid_inter.reshape(1, 3)
+        self.dg.sw_foot_data[1, :] = self.leg_path.p_rear_final.reshape(1, 3)
         self.dg.sw_foot_data[2, :] = rl_ref.reshape(1, 3)

@@ -13,9 +13,32 @@ from sim.engine.pinocchio_engine import PinocchioEngine
 import pinocchio as pin
 
 from control.self_righting.rgc_mpc_solution.rgc_scheduler import SchedulerRGCMPC
+from control.self_righting.time_based_solution.time_based_scheduler import SchedulerTB
+
+TIME = False
+
+np.set_printoptions(linewidth=200)
 
 
-def dummy(tick):
+def dummy_time_base(tick):
+    if tick < 50:
+        action = 0
+    elif tick < 150:
+        action = 1
+    elif tick < 450:
+        action = 2
+    elif tick < 800:
+        action = 3
+    elif tick < 1050:
+        action = 4
+    elif tick < 1250:
+        action = 5
+    else:
+        action = 6
+    return action
+
+
+def dummy_rgc(tick):
     if tick < 50:
         action = 0
     elif tick < 150:
@@ -24,8 +47,12 @@ def dummy(tick):
         action = 2
     elif tick < 600:
         action = 3
-    else:
+    elif tick < 900:
         action = 4
+    elif tick < 1500:
+        action = 5
+    else:
+        action = 0
 
     return action
 
@@ -42,7 +69,11 @@ def main():
 
     conf_controller = {"pin_engine": pin_engine}
 
-    control = SchedulerRGCMPC(**conf_controller)
+    #
+    if TIME:
+        control = SchedulerTB(**conf_controller)
+    else:
+        control = SchedulerRGCMPC(**conf_controller)
 
     sim = Go2Sim(mj_model=model, mj_data=data, controller=control, pin_engine=pin_engine, viewer=viewer)
 
@@ -55,8 +86,12 @@ def main():
 
     sim.reset_robot_pose(b0=b0, r0=r0, q0=q0)
 
-    for tick in range(1500):
-        action = dummy(tick)
+    for tick in range(2000):
+        if TIME:
+            action = dummy_time_base(tick)
+        else:
+            action = dummy_rgc(tick)
+
         sim.simulation_loop(action)
 
 

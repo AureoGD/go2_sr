@@ -37,7 +37,7 @@ class StandUp(BaseRGCController):
         self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
         self.Ca = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
 
-        # Constraint matrix
+        # Aumented matrices
         self.Cc = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
 
         # Initialize constans
