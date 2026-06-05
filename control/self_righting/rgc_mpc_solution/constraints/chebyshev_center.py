@@ -105,7 +105,7 @@ class ChebyshevCenterSolver:
         normals = np.c_[np.cos(angles), np.sin(angles)]
 
         A = normals
-        b = np.full(6, radius)
+        b = radius + A @ center
 
         return A, b
 

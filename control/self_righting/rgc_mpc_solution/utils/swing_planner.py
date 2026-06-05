@@ -22,6 +22,40 @@ class SwingFootPlanner:
         self.p_swing_start = None
 
     # ----------------------------------------
+    # Geometry update
+    # ----------------------------------------
+    def update_geometry(self, foot_pos_front, foot_pos_rear, contacts, n, R=0.05):
+
+        self.foot_pos_front = foot_pos_front
+
+        pc1, pc2, pc3, pc4 = contacts
+        n = n / np.linalg.norm(n)
+
+        # Rotation axis
+        d_rot = pc4 - pc2
+        d_rot = d_rot / np.linalg.norm(d_rot)
+
+        # Perpendicular direction
+        d_perp = np.cross(n, d_rot)
+        d_perp = d_perp / np.linalg.norm(d_perp)
+
+        # Ensure outward direction
+        if (np.dot(d_perp, pc1 - pc2) < 0) and (np.dot(d_perp, pc3 - pc2) < 0):
+            d_perp = -d_perp
+
+        foot_world = foot_pos_rear.flatten()
+
+        self.p_front = pc2 + R * d_perp
+
+        self.p_rear_final = pc4 + R * d_perp
+
+        self.p_mid_inter = pc4 + d_rot * 0.5
+        self.p_mid_inter[2] = 0.35
+
+        self.p_swing_start = foot_world.copy()
+
+        # ----------------------------------------
+
     # Internal sigma update
     # ----------------------------------------
     def _compute_sigma(self, foot_pos):
@@ -56,38 +90,7 @@ class SwingFootPlanner:
 
         return self.sigma
 
-    # ----------------------------------------
-    # Geometry update
-    # ----------------------------------------
-    def update_geometry(self, foot_pos, contacts, n, R=0.05):
-
-        pc1, pc2, pc3, pc4 = contacts
-        n = n / np.linalg.norm(n)
-
-        # Rotation axis
-        d_rot = pc4 - pc2
-        d_rot = d_rot / np.linalg.norm(d_rot)
-
-        # Perpendicular direction
-        d_perp = np.cross(n, d_rot)
-        d_perp = d_perp / np.linalg.norm(d_perp)
-
-        # Ensure outward direction
-        if (np.dot(d_perp, pc1 - pc2) < 0) and (np.dot(d_perp, pc3 - pc2) < 0):
-            d_perp = -d_perp
-
-        foot_world = foot_pos.flatten()
-
-        self.p_front = pc2 + R * d_perp
-
-        self.p_rear_final = pc4 + R * d_perp
-
-        self.p_mid_inter = pc4 + d_rot * 0.5
-        self.p_mid_inter[2] = foot_world[2] * 3
-
-        self.p_swing_start = foot_world.copy()
-
-    def get_front_reference(self):
+    def get_front_reference(self, foot_pos):
         return self.p_front
 
     def get_rear_reference(self, foot_pos):
@@ -114,34 +117,18 @@ class SwingFootPlanner:
 
         return p, sigma
 
-    def _compute_bezier_controls(self, lift_dz=0.04, land_dz=0.04):
+    def _compute_bezier_controls(self, t1=0.6, t3=0.6):
         P0 = self.p_swing_start
-        P5 = self.p_rear_final.flatten()
-        Pm = self.p_mid_inter.flatten()
-        z_peak = Pm[2]
+        P4 = self.p_rear_final.flatten()
+        self.p_ctrl2 = self.p_mid_inter.flatten()
 
-        chord_mid_xy = 0.5 * (P0[:2] + P5[:2])
-        lateral = Pm[:2] - chord_mid_xy
-        lateral_norm = lateral / np.linalg.norm(lateral)
+        # P1 along the line P0 → P2
+        self.p_ctrl1 = P0 + t1 * (self.p_ctrl2 - P0)
+        self.p_ctrl1[2] = self.p_ctrl2[2] * 0.75
 
-        reach_P1 = np.dot(P0[:2] - chord_mid_xy, lateral_norm)
-        reach_P4 = np.dot(P5[:2] - chord_mid_xy, lateral_norm)
-
-        # P1: lift-off — stay near P0 xy, just rise slightly
-        xy1 = P0[:2] + max(reach_P1, 0) * lateral_norm
-        self.p_ctrl1 = np.array([xy1[0], xy1[1], P0[2] + lift_dz])  # ← fixed
-
-        # P2: full lateral clearance, peak height
-        self.p_ctrl2 = Pm.copy()
-
-        # P3: midpoint xy between Pm and P5, still at peak
-        xy3 = 0.5 * (Pm[:2] + P5[:2])
-        self.p_ctrl3 = np.array([xy3[0], xy3[1], z_peak])
-
-        # P4: pre-landing — stay near P5 xy, just above ground
-        xy4 = P5[:2] + max(reach_P4, 0) * lateral_norm
-        self.p_ctrl4 = np.array([xy4[0], xy4[1], P5[2] + land_dz])  # ← fixed
-        # ----------------------------------------
+        # P3 along the line P2 → P4
+        self.p_ctrl3 = self.p_ctrl2 + t3 * (P4 - self.p_ctrl2)
+        self.p_ctrl3[2] = self.p_ctrl2[2] * 0.75
 
     # NEW: Bézier trajectory evaluation
     # ----------------------------------------
@@ -149,22 +136,19 @@ class SwingFootPlanner:
         if self.p_ctrl1 is None:
             raise RuntimeError("Bézier geometry not initialized.")
 
-        sigma = self._compute_sigma_bezier(foot_pos)  # <-- use this instead
+        sigma = self._compute_sigma_bezier(foot_pos)
         t = sigma
         u = 1 - t
 
         P0 = self.p_swing_start
         P1 = self.p_ctrl1
-        P2 = self.p_ctrl2
+        P2 = self.p_ctrl2  # p_mid_inter
         P3 = self.p_ctrl3
-        P4 = self.p_ctrl4
-        P5 = self.p_rear_final.flatten()
+        P4 = self.p_rear_final.flatten()
 
-        p = (u**5 * P0 + 5 * u**4 * t * P1 + 10 * u**3 * t**2 * P2 + 10 * u**2 * t**3 * P3 + 5 * u * t**4 * P4 +
-             t**5 * P5)
+        p = (u**4 * P0 + 4 * u**3 * t * P1 + 6 * u**2 * t**2 * P2 + 4 * u * t**3 * P3 + t**4 * P4)
 
-        vel = 5 * (u**4 * (P1 - P0) + 4 * u**3 * t * (P2 - P1) + 6 * u**2 * t**2 * (P3 - P2) + 4 * u * t**3 *
-                   (P4 - P3) + t**4 * (P5 - P4))
+        vel = 4 * (u**3 * (P1 - P0) + 3 * u**2 * t * (P2 - P1) + 3 * u * t**2 * (P3 - P2) + t**3 * (P4 - P3))
 
         return p, sigma, vel
 

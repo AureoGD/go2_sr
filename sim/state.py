@@ -20,6 +20,7 @@ class Go2State:
 
     foot_contacts: np.ndarray = field(default_factory=lambda: np.zeros(12))
     foot_forces: np.ndarray = field(default_factory=lambda: np.zeros(12))
+    foot_touching: np.ndarray = field(default_factory=lambda: np.zeros(4))
 
 
 @dataclass

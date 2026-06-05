@@ -1,12 +1,17 @@
 import numpy as np
 import mujoco
 
+RED = [1, 0, 0, 1]
+GREEN = [0, 1, 0, 1]
+BLUE = [0, 0, 1, 1]
+GREY = [0.75, 0.75, 0.75, 1]
+
 
 class DebugVisualizer:
 
     def __init__(self, viewer):
         self.viewer = viewer
-        self.colors = [[1, 0, 0, 1], [0, 1, 0, 1], [0, 0, 1, 1]]
+        self.colors = [RED, GREY, GREY, GREY, GREY, GREEN, BLUE, RED]
 
     def _add_sphere(self, scn, pos, radius, rgba):
         if scn.ngeom >= scn.maxgeom:

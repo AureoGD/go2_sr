@@ -6,12 +6,12 @@ from control.self_righting.rgc_mpc_solution.modes.hold_position import HoldPosit
 from control.self_righting.rgc_mpc_solution.modes.go_safe import GoSafe
 from control.self_righting.rgc_mpc_solution.modes.prepare_cw import PrepareCW
 from control.self_righting.rgc_mpc_solution.modes.roll_cw import RollCW
-from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
 from control.self_righting.rgc_mpc_solution.modes.landing_cw import LandingCW
-
+from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
+from control.self_righting.rgc_mpc_solution.modes.prone_final import prone_final
 from control.self_righting.rgc_mpc_solution.modes.stand_up import StandUp
 
-CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUp]
+CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, prone_final, StandUp]
 
 
 class SchedulerRGCMPC(BaseSelfRighting):

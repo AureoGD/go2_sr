@@ -63,6 +63,8 @@ class Go2Sim:
         self.viewer = viewer
         self._is_render = viewer is not None
 
+        # self.debug_viz = None
+
         self.debug_viz = DebugVisualizer(self.viewer)
 
         # -------------------------------
@@ -106,6 +108,7 @@ class Go2Sim:
 
             # self._feet_quatities()
 
+        self._feet_quatities()
         # --------------------------------------
         # 4. AFTER STEP
         # --------------------------------------
@@ -129,7 +132,35 @@ class Go2Sim:
         self.robot_state.r_vel = self.pin_engine.vcom()
 
     def _feet_quatities(self):
-        self.robot_state.foot_contacts = self.pin_engine.feet_positions_array().reshape(12)
+        # self.robot_state.foot_contacts = self.pin_engine.feet_positions_array().reshape(12)
+        # current_contacts = self.mj_data.contact.geom1
+        # contact_list = []
+        # for i in range(len(current_contacts)):
+        #     contact_name = self.mj_model.geom(current_contacts[i]).name
+        #     if contact_name != '':
+        #         contact_list.append(contact_name)
+        # foot_names = ['FR', 'FL', 'RR', 'RL']
+        # for idx, foot in enumerate(foot_names):
+        #     if foot in contact_list:
+        #         self.robot_state.foot_touching[idx] = 1
+        #     else:
+        #         self.robot_state.foot_touching[idx] = 0
+        foot_map = {'FR': 0, 'FL': 1, 'RR': 2, 'RL': 3}
+
+        self.robot_state.foot_touching[:] = 0
+
+        for i in range(self.mj_data.ncon):
+
+            contact = self.mj_data.contact[i]
+
+            g1 = self.mj_model.geom(contact.geom1).name
+            g2 = self.mj_model.geom(contact.geom2).name
+
+            if g1 in foot_map:
+                self.robot_state.foot_touching[foot_map[g1]] = 1
+
+            if g2 in foot_map:
+                self.robot_state.foot_touching[foot_map[g2]] = 1
 
     # ======================================================
     # LOW-LEVEL CONTROL (PD + gravity)
@@ -156,6 +187,8 @@ class Go2Sim:
         tau_g = self.pin_engine.gravity()
 
         tau = tau_pd + tau_g
+
+        tau = tau_pd
 
         if not np.isfinite(tau).all():
             raise RuntimeError("Torque inválido")

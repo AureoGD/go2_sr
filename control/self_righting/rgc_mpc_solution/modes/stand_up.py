@@ -14,7 +14,7 @@ class StandUp(BaseRGCController):
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.action_group = 6
+        self.action_group = 7
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -61,8 +61,8 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
 
         # Output weight matrix
-        Q_rz = np.array([5])
-        Q_eps = 7.5 * np.eye(4)
+        Q_rz = np.array([10])
+        Q_eps = 2.5 * np.eye(4)
         Q_dr = 1 * np.eye(3)
         Q_omega = 1 * np.eye(3)
         Q = block_diag(Q_rz, Q_eps, Q_dr, Q_omega)
@@ -72,7 +72,7 @@ class StandUp(BaseRGCController):
         # Input weight matrix
         dqrWeight = np.array([1, 1, 1])
         Rdqr = np.diag(dqrWeight)
-        R = 0.75 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
+        R = 1 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
 
         self.R = block_diag(*[R] * self.M)
 
@@ -91,7 +91,7 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
         # Controller specific variables and objects
         # ----------------------------------------
-        self.z_ref = np.array([[0.2]]).reshape(1, 1)
+        self.z_ref = np.array([[0.15]]).reshape(1, 1)
 
         self.L = np.zeros((12, 38), dtype=np.float32)
         self.L[:, 6:18] = -self.kp * np.identity(12)
