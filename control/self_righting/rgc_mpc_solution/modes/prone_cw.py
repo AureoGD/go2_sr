@@ -220,6 +220,9 @@ class ProneCW(BaseRGCController):
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
             epsRef = epsRef.reshape(4, 1)
 
+            self.qr[0:2] = self.rs.q[1:3].reshape(2, 1)
+            self.qr[2:] = self.rs.q[7:9].reshape(2, 1)
+
             ref = np.vstack((self.qr.reshape(-1, 1), epsRef))
 
             self.ref = np.tile(ref, (self.N, 1))

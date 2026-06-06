@@ -69,6 +69,9 @@ class prone_final(BaseRGCController):
         self.qr2 = np.array([[0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7]]).transpose()
         # qr = np.array([[1.04, 1.4, -2.3, -0.4, 0.7, -2.3, 0.00, 1.40, -2.7, -0.4, 0.7, -2.3]]).transpose()
 
+        self.qr_fr1 = np.array([[2.2, -2.7]]).transpose()
+        self.qr_rr1 = np.array([[2.2, -2.7]]).transpose()
+
         M = np.diag([0.02, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005])
 
         M_diag = np.diag(M)
@@ -142,18 +145,24 @@ class prone_final(BaseRGCController):
         percent_f = norm_ef / max(self.norm_ef, eps)
         percent_r = norm_er / max(self.norm_er, eps)
 
-        if percent_f > 0.15 and not self.final_ref:
-            ref = np.vstack((self.qr1[0:3].reshape(-1, 1), self.qr_start[3:].reshape(-1, 1)))
-            self.ref = np.tile(ref, (self.N, 1))
+        if percent_f > 0.25 and not self.final_ref:
+            ref = self.qr_start.copy()
+            ref[1:3] = self.qr_fr1.reshape(2,)
+            self.ref = np.tile(ref.reshape(-1, 1), (self.N, 1))
         elif percent_r > 0.15 and not self.final_ref:
-            self.ref = np.tile(self.qr1, (self.N, 1))
+            ref = self.qr_start.copy()
+            ref[0] = 0
+            ref[1:3] = self.qr_fr1.reshape(2,)
+            ref[7:9] = self.qr_rr1.reshape(2,)
+            self.ref = np.tile(ref.reshape(-1, 1), (self.N, 1))
         else:
             self.final_ref = True
             self.ref = np.tile(self.qr2, (self.N, 1))
 
     def eval_norms(self):
-        error = self.rs.q.reshape(-1, 1) - self.qr1.reshape(-1, 1)
-        norm_ef = np.linalg.norm(error[0:3])
-        norm_er = np.linalg.norm(error[6:9])
+        error_fr = self.rs.q[1:3].reshape(2, 1) - self.qr_fr1
+        error_rr = self.rs.q[7:9].reshape(2, 1) - self.qr_rr1
+        norm_ef = np.linalg.norm(error_fr)
+        norm_er = np.linalg.norm(error_rr)
 
         return norm_ef, norm_er
