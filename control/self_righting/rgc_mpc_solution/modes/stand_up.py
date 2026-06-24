@@ -14,7 +14,7 @@ class StandUp(BaseRGCController):
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.action_group = 7
+        self.phase = 7
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -185,7 +185,7 @@ class StandUp(BaseRGCController):
         self.L[:, 0:3] = -self.kd * gamma_l_star
         self.L[:, 3:6] = self.kd * gamma_a_star
 
-    def build_constraint_matrices(self):
+    def build_output_constraint_matrices(self):
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))

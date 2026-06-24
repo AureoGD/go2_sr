@@ -6,7 +6,7 @@ class HoldPosition(BaseRGCController):
 
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
-        self.action_group = 0
+        self.phase = 0
 
         # ----------------------------------------
         # Low-level mode controller gains
@@ -18,7 +18,7 @@ class HoldPosition(BaseRGCController):
     def update_dqr(self):
         return np.zeros(12)
 
-    def build_constraint_matrices(self):
+    def build_output_constraint_matrices(self):
         pass
 
     def update_model(self):

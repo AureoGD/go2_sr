@@ -10,7 +10,7 @@ class GoSafe(BaseRGCController):
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.action_group = 1
+        self.phase = 1
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -21,7 +21,7 @@ class GoSafe(BaseRGCController):
         self.nx = 12  # delta q (12, 1)
         self.nu = 12  # delta qr (12, 1)
         self.ny = 12  # qr (12, 1)
-        self.nc = 18  # qr (12,1), legs links dist (6, 1)
+        self.nc = 30  # qr (12,1), legs links dist (6, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -102,6 +102,9 @@ class GoSafe(BaseRGCController):
         self.Kp_vec = np.ones(12) * self.kp / 2
         self.Kd_vec = np.ones(12) * self.kd / 10
 
+        self.kp_mtx = np.diag(self.Kp_vec)
+        self.kd_mtx = np.diag(self.Kd_vec)
+
     def update_model(self):
         M = self.pin_engine.actuated_mass_matrix()
 
@@ -116,7 +119,7 @@ class GoSafe(BaseRGCController):
 
         self.x = np.vstack((self.rs.q.reshape(-1, 1), self.cs.qr.reshape(-1, 1)))
 
-    def build_constraint_matrices(self):
+    def build_output_constraint_matrices(self):
 
         J, dist = self_collision_constraints(pin_engine=self.pin_engine,
                                              pairs=self.collision_pairs,
@@ -126,18 +129,21 @@ class GoSafe(BaseRGCController):
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
-        self.Cc[12:, 0:12] = self.ts * J @ (-self.lambda_vec * self.Iu).reshape(12, 12)
-        self.Cc[12:, 12:] = self.ts * J @ (self.lambda_vec * self.Iu).reshape(12, 12)
+        self.Cc[12:18, 0:12] = self.ts * J @ (-self.lambda_vec * self.Iu).reshape(12, 12)
+        self.Cc[12:18, 12:] = self.ts * J @ (self.lambda_vec * self.Iu).reshape(12, 12)
+
+        tau_c = self.kp_mtx - np.diag(self.lambda_vec) @ self.kd_mtx
+        self.Cc[18:, 0:12] = -tau_c
+        self.Cc[18:, 12:] = tau_c
 
         Phi_cons[:self.nc, :] = self.Cc @ self.Aa
         aux_cons = self.Cc @ self.Ba
 
-        if self.first_int:
-            l = np.vstack((self.q_min.reshape(-1, 1), dist.reshape(-1, 1)))
-            u = np.vstack((self.q_max.reshape(-1, 1), self.inf_vec.reshape(-1, 1)))
+        l = np.vstack((self.q_min.reshape(-1, 1), dist.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), self.inf_vec.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
 
-            self.l = np.tile(l, (self.N, 1))
-            self.u = np.tile(u, (self.N, 1))
+        self.l = np.tile(l, (self.N, 1))
+        self.u = np.tile(u, (self.N, 1))
 
         return aux_cons, Phi_cons
 

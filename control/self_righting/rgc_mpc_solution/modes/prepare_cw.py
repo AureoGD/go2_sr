@@ -3,6 +3,7 @@ import pinocchio as pin
 from scipy.linalg import block_diag
 
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
+from control.self_righting.rgc_mpc_solution.constraints.plane_colision import PlaneConstraint
 
 
 class PrepareCW(BaseRGCController):
@@ -13,7 +14,7 @@ class PrepareCW(BaseRGCController):
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.action_group = 2
+        self.phase = 2
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -24,7 +25,7 @@ class PrepareCW(BaseRGCController):
         self.nx = 18  # joint pos (12, 1), rl knee pos (3, 1), rl foot pos (3, 1)
         self.nu = 12  # delta qr (12, 1)
         self.ny = 12  # joint pos (12, 1)
-        self.nc = 12  # qr (12, 1) TODO: add knee contact
+        self.nc = 25  # qr (12, 1), knee contact (1,1), (12,1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -63,16 +64,17 @@ class PrepareCW(BaseRGCController):
         Qq = np.array([0.01, 0.01, 0.01])
         Qq = np.diag(Qq)
 
-        Qf = np.array([0.1, 0.1, 0.1])
+        Qf = np.array([1, 0.05, 0.05])
         Qf = np.diag(Qf)
 
         Q = block_diag(Qq, Qq, Qq, Qf)
         self.Q = block_diag(*[Q] * self.N)
 
-        Rdqr = np.array([1, 1, 1])
+        Rdqr = np.array([10, 10, 10])
         Rdqr = np.diag(Rdqr)
-
-        R = block_diag(10 * Rdqr, 10 * Rdqr, 10 * Rdqr, 250 * Rdqr)
+        Rdqrf = np.array([0.1, 20, 5])
+        Rdqrf = np.diag(Rdqrf)
+        R = block_diag(Rdqr, Rdqr, Rdqr, Rdqrf)
         self.R = block_diag(*[R] * self.M)
 
         qr = np.array([[-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, -1.025, 4.15, -2.2]]).transpose()
@@ -80,9 +82,11 @@ class PrepareCW(BaseRGCController):
         self.ref = np.tile(ref, (self.N, 1))
 
         self.p_offset_local = np.array([0.0, 0.0, 0.06755])
-        self.d_safe = 0.075
+        self.d_safe = 0.05
         R_b_plane = self.roty(-5)
         self.n_local = R_b_plane @ np.array([0.0, 0.0, 1.0])
+
+        self.colision_cons = PlaneConstraint(self.n_local, self.p_offset_local, self.d_safe, np.zeros((3, 1)))
 
         self.first_int = True
 
@@ -94,6 +98,9 @@ class PrepareCW(BaseRGCController):
 
         self.Kp_vec = np.ones(12) * self.kp
         self.Kd_vec = np.ones(12) * self.kd / 10
+
+        self.kp_mtx = np.diag(self.Kp_vec)
+        self.kd_mtx = np.diag(self.Kd_vec)
 
     def update_model(self):
         M = self.pin_engine.actuated_mass_matrix()
@@ -122,19 +129,30 @@ class PrepareCW(BaseRGCController):
         self.x = np.vstack(
             (self.rs.q.reshape(-1, 1), rl_knee.reshape(-1, 1), rl_foot.reshape(-1, 1), self.cs.qr.reshape(-1, 1)))
 
-    def build_constraint_matrices(self):
+    def build_output_constraint_matrices(self):
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
-        Phi_cons[:self.nc, :] = self.Cc @ self.Aa
-        aux_cons = self.Cc @ self.Ba
-
         if self.first_int:
-            l = self.q_min.reshape(-1, 1)
-            u = self.q_max.reshape(-1, 1)
+            Rb = self.pin_engine.get_base_rot_mtx()
+            n_w, lb, ub, p_offset_w = self.colision_cons.update(p_base=self.rs.b_pos, R_b=Rb, p=self.x[12:15])
+            self.dg.plane_pos = p_offset_w
+            self.Cc[12, 12:15] = n_w
+            tau_c = self.kp_mtx - np.diag(self.lambda_vec) @ self.kd_mtx
+            self.Cc[13:, 0:12] = -tau_c
+            self.Cc[13:, 18:] = tau_c
+
+            margin = float(n_w @ self.x[12:15]) - lb
+            slack = max(0.0, -margin + 1e-4)
+
+            l = np.vstack((self.q_min.reshape(-1, 1), lb - slack, self.tau_min.reshape(-1, 1)))
+            u = np.vstack((self.q_max.reshape(-1, 1), ub, self.tau_max.reshape(-1, 1)))
 
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
+
+        Phi_cons[:self.nc, :] = self.Cc @ self.Aa
+        aux_cons = self.Cc @ self.Ba
 
         return aux_cons, Phi_cons
 

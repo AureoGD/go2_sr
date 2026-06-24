@@ -20,4 +20,4 @@ class LandingCW(BaseTimeController):
         delta_times = [0.3, 0.1] if stochastic else None
 
         super().__init__(state, references, settling_times, delta_times=delta_times, seed=seed)
-        self.action_group = 4
+        self.phase = 4

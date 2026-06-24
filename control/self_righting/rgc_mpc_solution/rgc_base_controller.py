@@ -18,7 +18,7 @@ class BaseRGCController(ABC):
         self.kp = kwargs.get("kp", 50.0)
         self.kd = kwargs.get("kd", 3.0)
 
-        self.action_group = None
+        self.phase = None
 
         # Predic and control horizons and sampe time
         self.N = None
@@ -61,8 +61,14 @@ class BaseRGCController(ABC):
         self.Phi_y = None
         self.G_y = None
 
-        self.Phi_c = None
-        self.G_c = None
+        self.Phi_cy = None
+        self.G_cy = None
+
+        self.Phi_cu = None
+        self.G_cu = None
+
+        self.lu = None
+        self.uu = None
 
         self.H = None
         self.F = None
@@ -128,8 +134,9 @@ class BaseRGCController(ABC):
         aux[:, :] = self.Ca @ self.Ba
         self.Phi_y[0:self.ny, :] = self.Ca @ self.Aa
 
-        self.G_c = np.zeros((self.nc * self.N, self.nu * self.M))
-        aux_cons, self.Phi_c = self.build_constraint_matrices()
+        self.G_cy = np.zeros((self.nc * self.N, self.nu * self.M))
+        aux_cons, self.Phi_cy = self.build_output_constraint_matrices()
+        self.G_cu, self.Phi_cu = self.build_input_constraint_matrices()
 
         for i in range(self.N):
             j = 0
@@ -138,12 +145,12 @@ class BaseRGCController(ABC):
                 self.Phi_y[i * self.ny:(i + 1) * self.ny, :] = self.Phi_y[(i - 1) * self.ny:i * self.ny, :] @ self.Aa
                 aux[:, :] = self.Phi_y[(i - 1) * self.ny:i * self.ny, :] @ self.Ba
 
-                self.Phi_c[i * self.nc:(i + 1) * self.nc, :] = self.Phi_c[(i - 1) * self.nc:i * self.nc, :] @ self.Aa
-                aux_cons[:, :] = self.Phi_c[(i - 1) * self.nc:i * self.nc, :] @ self.Ba
+                self.Phi_cy[i * self.nc:(i + 1) * self.nc, :] = self.Phi_cy[(i - 1) * self.nc:i * self.nc, :] @ self.Aa
+                aux_cons[:, :] = self.Phi_cy[(i - 1) * self.nc:i * self.nc, :] @ self.Ba
 
             while (j < self.M) and (i + j < self.N):
                 self.G_y[(i + j) * self.ny:(i + j + 1) * self.ny, j * (self.nu):(j + 1) * (self.nu)] = aux[:, :]
-                self.G_c[(i + j) * self.nc:(i + j + 1) * self.nc, j * (self.nu):(j + 1) * (self.nu)] = aux_cons[:, :]
+                self.G_cy[(i + j) * self.nc:(i + j + 1) * self.nc, j * (self.nu):(j + 1) * (self.nu)] = aux_cons[:, :]
                 j += 1
 
     def build_cost_function(self):
@@ -158,11 +165,18 @@ class BaseRGCController(ABC):
 
     def build_constraint_problem(self):
 
-        self.Gc_sparse = sparse.csc_matrix(self.G_c)
+        if self.G_cu is not None:
+            G = sparse.csc_matrix(np.vstack((self.G_cy, self.G_cu)))
+            l = np.vstack((self.l - self.Phi_cy @ self.x, self.lu))
+            u = np.vstack((self.u - self.Phi_cy @ self.x, self.uu))
+        else:
+            G = self.G_cy
+            l = self.l - self.Phi_cy @ self.x
+            u = self.u - self.Phi_cy @ self.x
 
-        self.lc = self.l - self.Phi_c @ self.x
-
-        self.uc = self.u - self.Phi_c @ self.x
+        self.Gc_sparse = sparse.csc_matrix(G)
+        self.lc = l
+        self.uc = u
 
     def setup_solver(self):
 
@@ -256,7 +270,7 @@ class BaseRGCController(ABC):
         return self.Kp_vec, self.Kd_vec
 
     @abstractmethod
-    def build_constraint_matrices(self):
+    def build_output_constraint_matrices(self):
         pass
 
     @abstractmethod
@@ -266,3 +280,6 @@ class BaseRGCController(ABC):
     @abstractmethod
     def build_reference(self):
         pass
+
+    def build_input_constraint_matrices(self):
+        return None, None

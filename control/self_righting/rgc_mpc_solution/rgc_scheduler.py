@@ -7,11 +7,12 @@ from control.self_righting.rgc_mpc_solution.modes.go_safe import GoSafe
 from control.self_righting.rgc_mpc_solution.modes.prepare_cw import PrepareCW
 from control.self_righting.rgc_mpc_solution.modes.roll_cw import RollCW
 from control.self_righting.rgc_mpc_solution.modes.landing_cw import LandingCW
-from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
-from control.self_righting.rgc_mpc_solution.modes.prone_final import prone_final
+# from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
+
+from control.self_righting.rgc_mpc_solution.modes.prone_II_cw import ProneCW
 from control.self_righting.rgc_mpc_solution.modes.stand_up import StandUp
 
-CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, prone_final, StandUp]
+CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUp]
 
 
 class SchedulerRGCMPC(BaseSelfRighting):
@@ -74,7 +75,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
         self.delta_qr = active_ctrl.update_dqr().reshape(12)
 
         self.task_state.controller_index = controller_idx
-        self.task_state.action_group = active_ctrl.action_group
+        self.task_state.action_group = active_ctrl.phase
 
         Kp_vec, Kd_vec = active_ctrl.get_gains()
 

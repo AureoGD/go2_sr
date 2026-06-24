@@ -11,7 +11,7 @@ class RollCW(BaseRGCController):
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.action_group = 3
+        self.phase = 3
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -22,7 +22,7 @@ class RollCW(BaseRGCController):
         self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
         self.ny = 16  # joint pos (12, 1), body orientation (4, 1)
-        self.nc = 18  # qr (12, 1), CoM projection (6, 1) TODO: dqr (12, 1),
+        self.nc = 30  # qr (12, 1), CoM projection (6, 1) + dqr (12, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -93,6 +93,9 @@ class RollCW(BaseRGCController):
 
         self.Kp_mtx = np.diag(self.Kp_vec)
         self.Kd_mtx = np.diag(self.Kd_vec)
+
+        self.Cc[18:, 3:15] = -self.Kp_mtx
+        self.Cc[18:, 23:] = self.Kp_mtx
 
     def update_model(self):
         x, y, z, w = self.rs.epsilon
@@ -181,16 +184,18 @@ class RollCW(BaseRGCController):
         self.x = np.vstack((self.rs.omega.reshape(-1, 1), self.rs.q.reshape(-1, 1), self.rs.r_pos.reshape(-1, 1),
                             self.rs.epsilon.reshape(-1, 1), np.array([[-9.81]]), self.cs.qr.reshape(-1, 1)))
 
-    def build_constraint_matrices(self):
+        self.Cc[18:, 0:3] = -self.Kd_mtx @ gamma_a_star
+
+    def build_output_constraint_matrices(self):
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
         if self.first_int:
             _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
-            self.Cc[12:, 15:17] = A_hex
-            l = np.vstack((self.q_min.reshape(-1, 1), -self.com_const.reshape(-1, 1)))
-            u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1)))
+            self.Cc[12:18, 15:17] = A_hex
+            l = np.vstack((self.q_min.reshape(-1, 1), -self.com_const.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
+            u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
 
@@ -200,6 +205,17 @@ class RollCW(BaseRGCController):
         aux_cons = self.Cc @ self.Ba
 
         return aux_cons, Phi_cons
+
+    # def build_input_constraint_matrices(self):
+    #     if self.G_cu is None:
+    #         G_cu = np.eye(12)
+    #         self.G_cu = block_diag(*[G_cu] * self.M)
+    #         l = (self.tau_min / self.Kp_vec).reshape(12, 1)
+    #         u = (self.tau_max / self.Kp_vec).reshape(12, 1)
+    #         self.lu = np.tile(l, (self.M, 1))
+    #         self.uu = np.tile(u, (self.M, 1))
+
+    #     return self.G_cu, self.Phi_cu
 
     def build_reference(self):
         if self.first_int:

@@ -7,6 +7,7 @@ from control.self_righting.rgc_mpc_solution.utils.geometry import plane_normal
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
 
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
+from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
 
 
 class LandingCW(BaseRGCController):
@@ -14,7 +15,7 @@ class LandingCW(BaseRGCController):
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.action_group = 4
+        self.phase = 4
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -25,7 +26,7 @@ class LandingCW(BaseRGCController):
         self.nx = 29
         self.nu = 12  # delta qr (12, 1)
         self.ny = 16  # FR q (3, 1), FL q (3, 1), epsilon (4, 1), FL foot (3, 1), RL foot (3, 1)
-        self.nc = 12  # qr (12, 1), TODO: dqr (12, 1), CoM projection (6, 1),
+        self.nc = 30  # qr (12, 1), CoM projection (6, 1), dqr (12, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -57,8 +58,8 @@ class LandingCW(BaseRGCController):
 
         Qr = 10 * np.diag(np.array([1, 1, 1]))  # FR and RR joints
         Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
-        Qposfl = 0.25 * np.diag(np.array([4, 4, 1]))  # FL foot (P1)
-        Qposrl = 1 * np.diag(np.array([4, 4, 1]))  # RL foot (P2)
+        Qposfl = 1 * np.diag(np.array([4, 4, 4]))  # FL foot (P1)
+        Qposrl = 1 * np.diag(np.array([4, 4, 4]))  # RL foot (P2)
 
         Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl)
         self.Q = block_diag(*[Q] * self.N)
@@ -88,7 +89,11 @@ class LandingCW(BaseRGCController):
 
         self.first_int = True
 
-        self.leg_path = SwingFootPlanner(bezier_mode=True)
+        self.leg_path = SwingFootPlanner(N=self.N, dt=self.ts)
+
+        self.cheby_center_solver = ChebyshevCenterSolver()
+        self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
+
         # ----------------------------------------
         # Low-level mode controller gains
         # ----------------------------------------
@@ -113,9 +118,6 @@ class LandingCW(BaseRGCController):
 
         mean_pivot = 0.5 * (pivot_fr + pivot_rr)
 
-        J_pivot_front = self.pin_engine.linear_leg_jacobian('FR', "hip")
-        J_pivot_rear = self.pin_engine.linear_leg_jacobian('RR', "hip")
-
         Jc = np.zeros((12, 12))
         Sa = np.zeros((12, 3))
 
@@ -124,13 +126,6 @@ class LandingCW(BaseRGCController):
             "FL": None,  # <-swing leg
             "RR": pivot_rr,
             "RL": None,  # <-swing leg
-        }
-
-        pivot_map_jac = {
-            "FR": J_pivot_front,
-            "FL": J_pivot_front,
-            "RR": J_pivot_rear,
-            "RL": J_pivot_rear,
         }
 
         foot_positions = {}
@@ -150,8 +145,8 @@ class LandingCW(BaseRGCController):
 
         self.contacts[0, :] = foot_positions['FR']
         self.contacts[1, :] = self.pin_engine.frame_pos('FR', 'thigh')
-        self.contacts[2, :] = foot_positions['RR']
-        self.contacts[3, :] = self.pin_engine.frame_pos('RR', 'thigh')
+        self.contacts[2, :] = self.pin_engine.frame_pos('RR', 'thigh')
+        self.contacts[3, :] = foot_positions['RR']
 
         M = self.pin_engine.actuated_mass_matrix()
 
@@ -237,11 +232,21 @@ class LandingCW(BaseRGCController):
                             self.rs.epsilon.reshape(-1, 1), -9.81, foot_fl.reshape(-1, 1), foot_rl.reshape(-1, 1),
                             self.cs.qr.reshape(-1, 1)))
 
-    def build_constraint_matrices(self):
+        self.Cc[18:, 0:3] = -self.Kd_mtx @ gamma_a_star
+        aux = self.Kp_mtx - self.Kd_mtx @ gamma_q_star
+        self.Cc[18:, 3:15] = -aux
+        self.Cc[18:, 29:] = aux
+
+    def build_output_constraint_matrices(self):
 
         if self.first_int:
-            l = self.q_min.reshape(-1, 1)
-            u = self.q_max.reshape(-1, 1)
+
+            _, _, A_hex, b_hex = self.cheby_center_solver.solve(
+                np.vstack((self.contacts[:, :], self.x[26:29].reshape(1, 3))))
+            self.Cc[12:18, 15:17] = A_hex
+
+            l = np.vstack((self.q_min.reshape(-1, 1), -self.com_const.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
+            u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
 
@@ -255,45 +260,32 @@ class LandingCW(BaseRGCController):
 
         return aux_cons, Phi_cons
 
+    # def build_input_constraint_matrices(self):
+    #     if self.G_cu is None:
+    #         G_cu = np.eye(12)
+    #         self.G_cu = block_diag(*[G_cu] * self.M)
+    #         l = (self.tau_min / self.Kp_vec).reshape(12, 1)
+    #         u = (self.tau_max / self.Kp_vec).reshape(12, 1)
+    #         self.lu = np.tile(l, (self.M, 1))
+    #         self.uu = np.tile(u, (self.M, 1))
+
+    #     return self.G_cu, self.Phi_cu
+
     def build_reference(self):
-        sw_foor_front = self.x[23:26]
-        sw_foor_rear = self.x[26:29]
+
+        sw_foot_front = self.x[23:26]
+        sw_foot_rear = self.x[26:29]
+
         if self.first_int:
-            new_contacts = np.zeros((3, 3), dtype=np.float32)
-            new_contacts[0, :] = sw_foor_rear.reshape(3,)
-            new_contacts[1, :] = self.contacts[1, :]
-            new_contacts[2, :] = self.contacts[3, :]
-            n, _ = plane_normal(new_contacts)
-
-            self.leg_path.update_geometry(sw_foor_front, sw_foor_rear, self.contacts, n, 0.35)
-
-            fl_ref = self.leg_path.get_front_reference(sw_foor_front)
-            rl_ref, _ = self.leg_path.get_rear_reference(sw_foor_rear)
-
+            self.leg_path.update_geometry(sw_foot_front, sw_foot_rear, self.contacts)
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
             epsRef = epsRef.reshape(4, 1)
+            ref = np.vstack((self.qr.reshape(-1, 1), epsRef, np.zeros((3, 1)), np.zeros((3, 1))))
+            self.ref = np.tile(ref, (self.N, 1))  # (N*ny, 1)
 
-            ref = np.vstack((self.qr.reshape(-1, 1), epsRef.reshape(-1, 1), fl_ref.reshape(-1,
-                                                                                           1), rl_ref.reshape(-1, 1)))
-            self.ref = np.tile(ref, (self.N, 1))
-        else:
+        fl_ref = self.leg_path.get_front_ref(sw_foot_front)  # (N,3)
+        rl_ref = self.leg_path.get_rear_ref(sw_foot_rear)  # (N,3)
 
-            if self.rs.foot_touching[0] == 1:
-                self.leg_path.p_front[2] = self.contacts[0, 2]
-            if self.rs.foot_touching[2] == 1:
-                self.leg_path.p_rear_final[2] = self.contacts[2, 2]
-
-            rl_ref, _ = self.leg_path.get_rear_reference(sw_foor_rear)
-            fl_ref = self.leg_path.get_front_reference(sw_foor_front)
-
-            self.ref.reshape(self.N, self.ny)[:, 10:13] = fl_ref.reshape(1, 3)
-            self.ref.reshape(self.N, self.ny)[:, 13:] = rl_ref.reshape(1, 3)
-
-        # self.dg.sw_foot_data[0, :] = self.leg_path.p_swing_start.reshape(1, 3)
-        # self.dg.sw_foot_data[1, :] = self.leg_path.p_ctrl1.reshape(1, 3)
-        # self.dg.sw_foot_data[2, :] = self.leg_path.p_ctrl2.reshape(1, 3)
-        # self.dg.sw_foot_data[3, :] = self.leg_path.p_ctrl3.reshape(1, 3)
-        # self.dg.sw_foot_data[4, :] = self.leg_path.p_rear_final.reshape(1, 3)
-        # self.dg.sw_foot_data[5, :] = rl_ref.reshape(1, 3)
-        # self.dg.sw_foot_data[6, :] = self.leg_path.p_front.reshape(1, 3)
+        self.ref.reshape(self.N, self.ny)[:, 10:13] = fl_ref
+        self.ref.reshape(self.N, self.ny)[:, 13:] = rl_ref
