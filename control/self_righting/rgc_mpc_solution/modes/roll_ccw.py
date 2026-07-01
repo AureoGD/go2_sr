@@ -6,7 +6,7 @@ from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_r
 from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
 
 
-class RollCW(BaseRGCController):
+class RollCCW(BaseRGCController):
 
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
@@ -55,12 +55,13 @@ class RollCW(BaseRGCController):
         Q = block_diag(Qrl, Qfl, Qrl, Qfl, Qeps)
         self.Q = block_diag(*[Q] * self.N)
 
-        # References
+        # # References
+        # qr = np.array([0.4, 1.5, -2.0, -0.6, 1.3, -2.6, 0.4, 1.5, -2.0, 0.4, 3.75, -1.5]).reshape(12, 1)
 
-        qr = np.array([0.4, 1.5, -2.0,
-                       -0.6, 1.3, -2.6,
-                         0.4, 1.5, -2.0,
-                           0.4, 3.75, -1.5]).reshape(12, 1)
+        qr = np.array([ 0.6, 1.3, -2.6,
+                        -0.4, 1.5, -2.0,
+                          -0.4, 3.75, -1.5,
+                            -0.4, 1.5, -2.0]).reshape(12, 1)
 
         qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
 
@@ -69,10 +70,10 @@ class RollCW(BaseRGCController):
         self.ref = np.tile(ref, (self.N, 1))
 
         # Update control action weight matrix
-        Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrfl = np.diag(np.array([1, 1, 1]))
-        Rdqrr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrl = 75 * np.diag(np.array([1, 1, 1]))
+        Rdqrfr = np.diag(np.array([1, 1, 1]))
+        Rdqrfl = 750 * np.diag(np.array([1, 10, 10]))
+        Rdqrr = 75 * np.diag(np.array([1, 1, 1]))
+        Rdqrl = 750 * np.diag(np.array([1, 10, 10]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
@@ -93,7 +94,7 @@ class RollCW(BaseRGCController):
 
         self.Kp_vec = np.ones(12) * self.kp
         self.Kd_vec = np.ones(12) * self.kd
-        self.Kd_vec[3:6] = self.kd / 10.0
+        self.Kd_vec[0:3] = self.kd / 10.0
 
         self.Kp_mtx = np.diag(self.Kp_vec)
         self.Kd_mtx = np.diag(self.Kd_vec)
@@ -108,19 +109,19 @@ class RollCW(BaseRGCController):
 
         J_com = self.pin_engine.com_jacobian()
 
-        pivot_fr = self.pin_engine.frame_pos("FR", "hip")
-        pivot_rr = self.pin_engine.frame_pos("RR", "hip")
+        pivot_fl = self.pin_engine.frame_pos("FL", "hip")
+        pivot_rl = self.pin_engine.frame_pos("RL", "hip")
 
-        mean_pivot = 0.5 * (pivot_fr + pivot_rr)
+        mean_pivot = 0.5 * (pivot_fl + pivot_rl)
 
         Jc = np.zeros((12, 12))
         Sa = np.zeros((12, 3))
 
         pivot_map = {
-            "FR": pivot_fr,
-            "FL": None,  # <-inative
-            "RR": pivot_rr,
-            "RL": mean_pivot,
+            "FR": None,
+            "FL": pivot_fl, 
+            "RR": mean_pivot,
+            "RL": pivot_rl,
         }
 
         foot_positions = {}
@@ -138,14 +139,14 @@ class RollCW(BaseRGCController):
             if pivot is not None:
                 Sa[3 * i:3 * (i + 1), :] = self.skew_symmetric_matrix(foot - pivot)
 
-        self.contacts[0, :] = pivot_rr
-        self.contacts[1, :] = foot_positions['RR']
-        self.contacts[2, :] = foot_positions['FR']
-        self.contacts[3, :] = pivot_fr
-        self.contacts[4, :] = foot_positions['RL']
+        self.contacts[0, :] = pivot_fl
+        self.contacts[1, :] = foot_positions['FL']
+        self.contacts[2, :] = foot_positions['RL']
+        self.contacts[3, :] = pivot_rl
+        self.contacts[4, :] = foot_positions['RR']
 
         gamma = Jc
-        gamma[3:6, :] = np.hstack((np.zeros((3, 3)), (np.eye(3)), np.zeros((3, 6))))
+        gamma[0:3, :] = np.hstack(((np.eye(3)), np.zeros((3, 9))))
 
         gamma_a_star = np.linalg.inv(gamma) @ Sa
 
@@ -154,7 +155,7 @@ class RollCW(BaseRGCController):
         I_com = self.pin_engine.centroidal_inertia()
         mass = self.total_mass
 
-        c_pivot = (pivot_fr + pivot_rr) / 2
+        c_pivot = (pivot_fl + pivot_rl) / 2
         r = self.rs.r_pos
         lever = r.flatten() - c_pivot
         S = self.skew_symmetric_matrix(lever)
@@ -210,20 +211,9 @@ class RollCW(BaseRGCController):
 
         return aux_cons, Phi_cons
 
-    # def build_input_constraint_matrices(self):
-    #     if self.G_cu is None:
-    #         G_cu = np.eye(12)
-    #         self.G_cu = block_diag(*[G_cu] * self.M)
-    #         l = (self.tau_min / self.Kp_vec).reshape(12, 1)
-    #         u = (self.tau_max / self.Kp_vec).reshape(12, 1)
-    #         self.lu = np.tile(l, (self.M, 1))
-    #         self.uu = np.tile(u, (self.M, 1))
-
-    #     return self.G_cu, self.Phi_cu
-
     def build_reference(self):
         if self.first_int:
             yaw = self.rs.rpy[2]
-            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
+            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
 
             self.ref.reshape(self.N, self.ny)[:, 12:] = epsRef.reshape(1, 4)

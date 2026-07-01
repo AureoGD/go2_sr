@@ -5,7 +5,7 @@ from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCCo
 from control.self_righting.rgc_mpc_solution.constraints.self_collision import self_collision_constraints
 
 
-class ProneCW(BaseRGCController):
+class ProneCCW(BaseRGCController):
 
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
@@ -120,12 +120,12 @@ class ProneCW(BaseRGCController):
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
-        Phi_cons[:self.nc, :] = self.Cc @ self.Aa
-        aux_cons = self.Cc @ self.Ba
-
         tau_c = self.kp_mtx - np.diag(self.lambda_vec) @ self.kd_mtx
         self.Cc[12:, 0:12] = -tau_c
         self.Cc[12:, 12:] = tau_c
+
+        Phi_cons[:self.nc, :] = self.Cc @ self.Aa
+        aux_cons = self.Cc @ self.Ba
 
         if self.first_int:
             l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
@@ -137,7 +137,6 @@ class ProneCW(BaseRGCController):
             self.first_int = False
 
         return aux_cons, Phi_cons
-
 
     #TODO: implement in a smart way
     def build_reference(self):
@@ -154,25 +153,25 @@ class ProneCW(BaseRGCController):
 
         if percent_f > 0.25 and not self.final_ref:
             ref = self.qr_start.copy()
-            ref[1:3] = self.qr_f1.reshape(2,) # FR 
-            ref[5] = -2.6 # FL
-            ref[11] = -2.6 #RL
+            ref[2] = -2.6 # FR
+            ref[4:6] = self.qr_f1.reshape(2,) # FL 
+            ref[8] = -2.6 #RR
             self.ref = np.tile(ref.reshape(-1, 1), (self.N, 1))
         elif percent_r > 0.25 and not self.final_ref:
             ref = self.qr_start.copy()
-            ref[0] = 0  # FR 
-            ref[1:3] = self.qr_f1.reshape(2,) # FR 
-            ref[5] = -2.6 # FL
-            ref[7:9] = self.qr_r1.reshape(2,) # RR
-            ref[11] = -2.6 # RL
+            ref[3] = 0  # FL 
+            ref[4:6] = self.qr_f1.reshape(2,) # FL 
+            ref[2] = -2.6 # FR
+            ref[10:12] = self.qr_r1.reshape(2,) # RL
+            ref[8] = -2.6 # RR
             self.ref = np.tile(ref.reshape(-1, 1), (self.N, 1))
         else:
             self.final_ref = True
             self.ref = np.tile(self.qr2.reshape(-1, 1), (self.N, 1))
 
     def eval_norms(self):
-        error_fr = self.rs.q[1:3].reshape(2, 1) - self.qr_f1
-        error_rr = self.rs.q[7:9].reshape(2, 1) - self.qr_r1
+        error_fr = self.rs.q[4:6].reshape(2, 1) - self.qr_f1
+        error_rr = self.rs.q[10:12].reshape(2, 1) - self.qr_r1
         norm_ef = np.linalg.norm(error_fr)
         norm_er = np.linalg.norm(error_rr)
 

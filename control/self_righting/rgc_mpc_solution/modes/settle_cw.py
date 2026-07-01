@@ -4,14 +4,15 @@ from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
 from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
+from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
 
 
-class RollCW(BaseRGCController):
+class SettleCW(BaseRGCController):
 
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
 
-        self.phase = 3
+        self.phase = 5
 
         # Predic and control horizons and sampe time
         self.N = 20
@@ -21,8 +22,8 @@ class RollCW(BaseRGCController):
         # Number of states, inputs, outputs and constarints
         self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 16  # joint pos (12, 1), body orientation (4, 1)
-        self.nc = 30  # qr (12, 1), CoM projection (6, 1) + dqr (12, 1)
+        self.ny = 4  # joint pos (12, 1), body orientation (4, 1)
+        self.nc = 28  # qr (12, 1), CoM projection (6, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -41,38 +42,21 @@ class RollCW(BaseRGCController):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:12, 3:15] = np.eye(12)
-        self.Ca[12:, 18:22] = np.eye(4)
+        self.Ca[:, 18:22] = np.eye(4)
 
         self.Cc[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qfl = np.diag(np.array([1, 1, 1]))
-        Qrl = np.diag(np.array([1, 1, 1]))
-        Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))
+        Qeps = 0.2 * np.diag(np.array([1, 1, 1, 1]))
 
-        Q = block_diag(Qrl, Qfl, Qrl, Qfl, Qeps)
+        Q = block_diag(Qeps)
         self.Q = block_diag(*[Q] * self.N)
-
-        # References
-
-        qr = np.array([0.4, 1.5, -2.0,
-                       -0.6, 1.3, -2.6,
-                         0.4, 1.5, -2.0,
-                           0.4, 3.75, -1.5]).reshape(12, 1)
-
-        qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
-
-        ref = np.vstack((qr, qeps))
-
-        self.ref = np.tile(ref, (self.N, 1))
-
         # Update control action weight matrix
-        Rdqrfr = 750 * np.diag(np.array([1, 10, 10]))
+        Rdqrfr = np.diag(np.array([1, 1, 1]))
         Rdqrfl = np.diag(np.array([1, 1, 1]))
-        Rdqrr = 750 * np.diag(np.array([1, 10, 10]))
-        Rdqrl = 75 * np.diag(np.array([1, 1, 1]))
+        Rdqrr = np.diag(np.array([1, 1, 1]))
+        Rdqrl = np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
@@ -93,13 +77,26 @@ class RollCW(BaseRGCController):
 
         self.Kp_vec = np.ones(12) * self.kp
         self.Kd_vec = np.ones(12) * self.kd
-        self.Kd_vec[3:6] = self.kd / 10.0
 
         self.Kp_mtx = np.diag(self.Kp_vec)
         self.Kd_mtx = np.diag(self.Kd_vec)
 
-        self.Cc[18:, 3:15] = -self.Kp_mtx
-        self.Cc[18:, 23:] = self.Kp_mtx
+        # ----------------------------------------
+        # Constraints
+        # ----------------------------------------
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
+        foot_u = np.array([0, 0, np.inf, np.inf, 100])
+
+        # Stack for all 2 feet
+        self.f_l = np.tile(foot_l.reshape(-1, 1), (2, 1))
+        self.f_u = np.tile(foot_u.reshape(-1, 1), (2, 1))
+
+        self.L = np.zeros((6, self.nx + self.nu), dtype=np.float32)
+        self.L[0:3, 6:9] = -self.kp * np.identity(3)
+        self.L[0:3, 26:29] = self.kp * np.identity(3)
+
+        self.L[3:6, 12:15] = -self.kp * np.identity(3)
+        self.L[3:6, 32:35] = self.kp * np.identity(3)
 
     def update_model(self):
         x, y, z, w = self.rs.epsilon
@@ -108,19 +105,17 @@ class RollCW(BaseRGCController):
 
         J_com = self.pin_engine.com_jacobian()
 
-        pivot_fr = self.pin_engine.frame_pos("FR", "hip")
-        pivot_rr = self.pin_engine.frame_pos("RR", "hip")
-
-        mean_pivot = 0.5 * (pivot_fr + pivot_rr)
+        pivot_f = self.pin_engine.frame_pos("FR", "thigh")
+        pivot_r = self.pin_engine.frame_pos("RR", "thigh")
 
         Jc = np.zeros((12, 12))
         Sa = np.zeros((12, 3))
 
         pivot_map = {
-            "FR": pivot_fr,
-            "FL": None,  # <-inative
-            "RR": pivot_rr,
-            "RL": mean_pivot,
+            "FR": pivot_f,
+            "FL": pivot_f,
+            "RR": pivot_r,
+            "RL": pivot_r,
         }
 
         foot_positions = {}
@@ -138,14 +133,12 @@ class RollCW(BaseRGCController):
             if pivot is not None:
                 Sa[3 * i:3 * (i + 1), :] = self.skew_symmetric_matrix(foot - pivot)
 
-        self.contacts[0, :] = pivot_rr
-        self.contacts[1, :] = foot_positions['RR']
-        self.contacts[2, :] = foot_positions['FR']
-        self.contacts[3, :] = pivot_fr
-        self.contacts[4, :] = foot_positions['RL']
+        self.contacts[0, :] = self.pin_engine.frame_pos('FL', "foot")
+        self.contacts[1, :] = self.pin_engine.frame_pos('RL', "foot")
+        self.contacts[2, :] = pivot_f
+        self.contacts[3, :] = pivot_r
 
         gamma = Jc
-        gamma[3:6, :] = np.hstack((np.zeros((3, 3)), (np.eye(3)), np.zeros((3, 6))))
 
         gamma_a_star = np.linalg.inv(gamma) @ Sa
 
@@ -154,7 +147,7 @@ class RollCW(BaseRGCController):
         I_com = self.pin_engine.centroidal_inertia()
         mass = self.total_mass
 
-        c_pivot = (pivot_fr + pivot_rr) / 2
+        c_pivot = (pivot_f + pivot_r) / 2
         r = self.rs.r_pos
         lever = r.flatten() - c_pivot
         S = self.skew_symmetric_matrix(lever)
@@ -188,42 +181,38 @@ class RollCW(BaseRGCController):
         self.x = np.vstack((self.rs.omega.reshape(-1, 1), self.rs.q.reshape(-1, 1), self.rs.r_pos.reshape(-1, 1),
                             self.rs.epsilon.reshape(-1, 1), np.array([[-9.81]]), self.cs.qr.reshape(-1, 1)))
 
-        self.Cc[18:, 0:3] = -self.Kd_mtx @ gamma_a_star
+        self.L[0:3, 0:3] = -self.kd * gamma_a_star[3:6, :]
+        self.L[3:6, 0:3] = -self.kd * gamma_a_star[9:12, :]
 
     def build_output_constraint_matrices(self):
 
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
-        if self.first_int:
-            _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
-            self.Cc[12:18, 15:17] = A_hex
-            l = np.vstack((self.q_min.reshape(-1, 1), -self.com_const.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
-            u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
-            self.l = np.tile(l, (self.N, 1))
-            self.u = np.tile(u, (self.N, 1))
-
-            self.first_int = False
+        _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
+        self.Cc[22:, 15:17] = A_hex
+        
+        pyramid_fric_matrix = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
+        J = np.zeros((6, 6))
+        J[0:3, 0:3] = self.Jinv[3:6, 3:6]
+        J[3:6, 3:6] = self.Jinv[9:12, 9:12]
+        self.Cc[12:22, :] = -pyramid_fric_matrix[0:10, 0:6] @ J @ self.L
 
         Phi_cons[0:self.nc, :] = self.Cc @ self.Aa
         aux_cons = self.Cc @ self.Ba
 
+        if self.first_int:
+
+            l = np.vstack((self.q_min.reshape(-1, 1), self.f_l.reshape(-1, 1), -self.com_const.reshape(-1, 1)))
+            u = np.vstack((self.q_max.reshape(-1, 1), self.f_u.reshape(-1, 1), b_hex.reshape(-1, 1)))
+            self.l = np.tile(l, (self.N, 1))
+            self.u = np.tile(u, (self.N, 1))
+            self.first_int = False
+
         return aux_cons, Phi_cons
-
-    # def build_input_constraint_matrices(self):
-    #     if self.G_cu is None:
-    #         G_cu = np.eye(12)
-    #         self.G_cu = block_diag(*[G_cu] * self.M)
-    #         l = (self.tau_min / self.Kp_vec).reshape(12, 1)
-    #         u = (self.tau_max / self.Kp_vec).reshape(12, 1)
-    #         self.lu = np.tile(l, (self.M, 1))
-    #         self.uu = np.tile(u, (self.M, 1))
-
-    #     return self.G_cu, self.Phi_cu
 
     def build_reference(self):
         if self.first_int:
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
-
-            self.ref.reshape(self.N, self.ny)[:, 12:] = epsRef.reshape(1, 4)
+            self.ref = np.tile(epsRef.reshape(-1, 1), (self.N, 1))

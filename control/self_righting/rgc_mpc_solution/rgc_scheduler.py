@@ -5,14 +5,18 @@ from control.self_righting.rgc_mpc_solution.state import RGCState
 from control.self_righting.rgc_mpc_solution.modes.hold_position import HoldPosition
 from control.self_righting.rgc_mpc_solution.modes.go_safe import GoSafe
 from control.self_righting.rgc_mpc_solution.modes.prepare_cw import PrepareCW
+from control.self_righting.rgc_mpc_solution.modes.prepare_ccw import PrepareCCW
 from control.self_righting.rgc_mpc_solution.modes.roll_cw import RollCW
-from control.self_righting.rgc_mpc_solution.modes.landing_cw import LandingCW
-# from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
-
-from control.self_righting.rgc_mpc_solution.modes.prone_II_cw import ProneCW
+from control.self_righting.rgc_mpc_solution.modes.roll_ccw import RollCCW
+from control.self_righting.rgc_mpc_solution.modes.swing_leg_cw import SwingLegCW
+from control.self_righting.rgc_mpc_solution.modes.swing_leg_ccw import SwingLegCCW
+from control.self_righting.rgc_mpc_solution.modes.settle_cw import SettleCW
+from control.self_righting.rgc_mpc_solution.modes.settle_ccw import SettleCCW
+from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
+from control.self_righting.rgc_mpc_solution.modes.prone_ccw import ProneCCW
 from control.self_righting.rgc_mpc_solution.modes.stand_up import StandUp
 
-CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, LandingCW, ProneCW, StandUp]
+CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, SwingLegCW, SettleCW, ProneCW, StandUp, PrepareCCW, RollCCW, SwingLegCCW, SettleCCW, ProneCCW]
 
 
 class SchedulerRGCMPC(BaseSelfRighting):

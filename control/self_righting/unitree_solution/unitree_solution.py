@@ -15,9 +15,12 @@ class UnitreeSelfRighting(BaseSelfRighting):
 
         # Hardcoded Unitree Sequences
         self.q_phase_0 = np.array([0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7])
-        self.q_phase_1 = np.array([0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, -1.0, 1.4, -2.8])
-        self.q_phase_2 = np.array([0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, -1.0, 4.3, -2.8])
-        self.q_phase_3 = np.array([-0.6, 1.55, -2.8, -0.21, 1.6, -2.8, -0.55, 1.6, -2.8, -0.16, 4.3, -2.8])
+        self.q_phase_1 = np.array([0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7, 0, 1.4, -2.7])
+        self.q_phase_2 = np.array([-0.8, 3.3, -2.77, 0.6, 2.2, -2.77, -0.8, 3.3, -2.77, 0.6, 2.2, -2.77])
+        self.q_phase_3 = np.array([0.8, 1.1, -2.2, -0.8, 2.97, -2.77, 0.8, 1.1, -2.2, -0.8, 2.97, -2.77])
+        self.q_phase_4 = np.array([-0.045, 1.26, -2.8, 0.5, 1.26, -2.8, -0.31, 1.295, -2.8, 0.31, 1.295, -2.8])
+        self.q_phase_5 = np.array([0, 0.67, -1.3, 0, 0.67, -1.3, 0, 0.67, -1.3, 0, 0.67, -1.3])
+
 
         # Gains per phase
         self.kp_mode_1 = np.array([80] * 12)
@@ -27,12 +30,12 @@ class UnitreeSelfRighting(BaseSelfRighting):
         self.kd_mode_1[[2, 5, 8, 11]] = 0
         self.kd_mode_2 = np.array([1] * 12)
 
-        self.kp_per_phase = [self.kp_mode_1, self.kp_mode_2, self.kp_mode_2, self.kp_mode_2]
-        self.kd_per_phase = [self.kd_mode_1, self.kd_mode_2, self.kd_mode_2, self.kd_mode_2]
+        self.kp_per_phase = [self.kp_mode_1, self.kp_mode_2, self.kp_mode_2, self.kp_mode_2,self.kp_mode_1,self.kp_mode_2]
+        self.kd_per_phase = [self.kd_mode_1, self.kd_mode_2, self.kd_mode_2, self.kd_mode_2, self.kd_mode_1, self.kd_mode_2]
 
-        self.sr_q_refs = [self.q_phase_0, self.q_phase_1, self.q_phase_2, self.q_phase_3]
-        self.ramp_duration = [65, 75, 75, 25]
-        self.phase_duration = [65, 100, 100, 40]
+        self.sr_q_refs = [self.q_phase_0, self.q_phase_1, self.q_phase_2, self.q_phase_3, self.q_phase_4, self.q_phase_5]
+        self.ramp_duration = [65, 65, 120, 120, 50, 50]
+        self.phase_duration = [65, 65, 140, 145, 70, 75]
 
         self.qr_ant = np.zeros((12, 1))
         self.increment_per_step = np.zeros((12, 1))
@@ -45,7 +48,7 @@ class UnitreeSelfRighting(BaseSelfRighting):
         cs = state.low_level
         rs = state.robot
 
-        if self.phase_iterations == 0:
+        if self.phase_iterations == 0 and self.phase_now ==0:
             cs.qr = rs.q
 
         self.dqr, Kp, Kd = self.compute_action(state, action)
@@ -58,13 +61,13 @@ class UnitreeSelfRighting(BaseSelfRighting):
     def compute_action(self, state, action=None):
         # Unitree strategy IGNORES the 'mode' input from NN
         # because it follows a strict time schedule.
-
+        dqr = np.zeros((12,1))
         if self.iterations < sum(self.phase_duration):
             # Init Phase
             if self.phase_iterations == 0:
                 # Initialize qr_ant if it's the very first step
                 if self.iterations == 0 and state is not None:
-                    self.qr_ant = state.robot.q.reshape(12, 1)
+                    self.qr_ant = state.low_level.qr.reshape(12, 1)
 
                 target = self.sr_q_refs[self.phase_now].reshape(12, 1)
                 duration = self.ramp_duration[self.phase_now]
@@ -75,7 +78,8 @@ class UnitreeSelfRighting(BaseSelfRighting):
 
             # Interpolate
             if self.phase_iterations < self.ramp_duration[self.phase_now]:
-                self.qr_ant = state.low_level.qr
+                dqr = self.increment_per_step
+
 
             self.phase_iterations += 1
 
@@ -85,7 +89,7 @@ class UnitreeSelfRighting(BaseSelfRighting):
                 self.phase_now += 1
 
         self.iterations += 1
-        return self.increment_per_step.reshape(12), self.KP, self.KD
+        return dqr.reshape(12), self.KP, self.KD
 
     def reset_phase(self):
         self.iterations = 0

@@ -364,6 +364,15 @@ class PinocchioEngine:
 
         return J_point[:, joint_slice]
 
+    def get_base_rot_mtx(self):
+        base_id = self.model.getFrameId("base_link")
+        pin.updateFramePlacements(self.model, self.data)
+
+        R_base = np.asarray(self.data.oMf[base_id].rotation)  # (3,3)
+        p_base = np.asarray(self.data.oMf[base_id].translation)  # (3,)
+
+        return R_base
+
     def get_joint_limits(self):
         return self.joint_limits.copy()
 

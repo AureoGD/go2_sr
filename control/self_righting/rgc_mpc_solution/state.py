@@ -26,3 +26,5 @@ class RGCState:
     primal_res: float = 0.0
 
     dual_res: float = 0.0
+
+    swing_foot_error: np.ndarray = field(default_factory=lambda: np.ones(6) * np.inf)

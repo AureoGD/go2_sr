@@ -21,4 +21,4 @@ class RollCW(BaseTimeController):
         delta_times = [0.1, 0.3, 0.15] if stochastic else None
 
         super().__init__(state, references, settling_times, delta_times=delta_times, seed=seed)
-        self.phase = 3
+        self.action_group = 3

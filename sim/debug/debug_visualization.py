@@ -1,5 +1,6 @@
 import numpy as np
 import mujoco
+from scipy.spatial.transform import Rotation as R
 
 RED = [1, 0, 0, 1]
 GREEN = [0, 1, 0, 1]
@@ -23,7 +24,23 @@ class DebugVisualizer:
 
         scn.ngeom += 1
 
-    def render(self, spheres):
+    def _add_plane(self, scn, pos, rpy, rgba, size=(1.0, 1.0)):
+        if scn.ngeom >= scn.maxgeom:
+            return
+
+        geom = scn.geoms[scn.ngeom]
+
+        # Roll-pitch-yaw -> rotation matrix
+        rot = R.from_euler('xyz', rpy).as_matrix()
+        rot_plane = R.from_euler('xyz', np.array([0, -5 * np.pi / 180, 0])).as_matrix()
+        rot = rot @ rot_plane
+
+        mujoco.mjv_initGeom(geom, mujoco.mjtGeom.mjGEOM_PLANE, np.array([size[0], size[1], 0.01]), pos, rot.flatten(),
+                            rgba)
+
+        scn.ngeom += 1
+
+    def render(self, spheres, plane_pos, rpy):
         if self.viewer is None:
             return
 
@@ -33,3 +50,5 @@ class DebugVisualizer:
         for i in range(len(spheres)):
             s = spheres[i]
             self._add_sphere(scn, pos=s, radius=0.015, rgba=self.colors[i])
+
+        # self._add_plane(scn, plane_pos.flatten(), rpy, RED)

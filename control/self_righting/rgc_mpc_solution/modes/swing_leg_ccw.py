@@ -10,7 +10,7 @@ from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCCo
 from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
 
 
-class SwingLegCW(BaseRGCController):
+class SwingLegCCW(BaseRGCController):
 
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
@@ -44,11 +44,11 @@ class SwingLegCW(BaseRGCController):
         self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
-        self.Ca[:3, 3:6] = np.eye(3)  # FR joints
-        self.Ca[3:6, 9:12] = np.eye(3)  # RR joints
+        self.Ca[:3, 6:9] = np.eye(3)  # FL joints
+        self.Ca[3:6, 12:15] = np.eye(3)  # RL joints
         self.Ca[6:10, 18:22] = np.eye(4)  # Quaternions
-        self.Ca[10:13, 23:26] = np.eye(3)  # FL foot
-        self.Ca[13:16, 26:29] = np.eye(3)  # RL foot
+        self.Ca[10:13, 23:26] = np.eye(3)  # FR foot
+        self.Ca[13:16, 26:29] = np.eye(3)  # RR foot
 
         self.Cc[0:12, self.nx:] = np.identity(12)
 
@@ -58,28 +58,23 @@ class SwingLegCW(BaseRGCController):
 
         Qr = 10 * np.diag(np.array([1, 1, 1]))  # FR and RR joints
         Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
-        Qposfl = 1.5 * np.diag(np.array([6, 6, 4]))  # FL foot (P1)
-        Qposrl = 1.5 * np.diag(np.array([6, 6, 4]))  # RL foot (P2)
+        Qposf = 1.5 * np.diag(np.array([6, 6, 4]))  # FL foot (P1)
+        Qposr = 1.5 * np.diag(np.array([6, 6, 4]))  # RL foot (P2)
 
-        Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl)
+        Q = block_diag(Qr, Qr, Qeps, Qposf, Qposr)
         self.Q = block_diag(*[Q] * self.N)
 
-        # use latter to update self.Q
-        self.single_output_dim = 19  # = 19
-        self.idx_RL1 = slice(13, 16)  # = 13:16
-        self.idx_RL2 = slice(16, 19)  # = 16:19
-
         # Update control action weight matrix
-        Rdqrfr = 1000 * np.diag(np.array([1, 1, 1]))
-        Rdqrfl = 40 * np.diag(np.array([1, 1, 1]))
-        Rdqrr = 1000 * np.diag(np.array([1, 1, 1]))
-        Rdqrl = 40 * np.diag(np.array([1, 1, 1]))
+        Rdqrfr = 40 * np.diag(np.array([1, 1, 1]))
+        Rdqrfl = 1000 * np.diag(np.array([1, 1, 1]))
+        Rdqrr = 40 * np.diag(np.array([1, 1, 1]))
+        Rdqrl = 1000 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
 
         # reference
-        self.qr = np.array([0.4, 1.5, -2.0, 0.4, 1.5, -2.0]).reshape(6, 1)
+        self.qr = np.array([-0.4, 1.5, -2.0, -0.4, 1.5, -2.0]).reshape(6, 1)
 
         self.Jinv = np.zeros((12, 12), dtype=np.float32)
 
@@ -100,8 +95,8 @@ class SwingLegCW(BaseRGCController):
 
         self.Kp_vec = np.ones(12) * self.kp
         self.Kd_vec = np.ones(12) * self.kd
-        self.Kd_vec[3:6] = self.kd / 10.0
-        self.Kd_vec[9:12] = self.kd / 10.0
+        self.Kd_vec[0:3] = self.kd / 10.0
+        self.Kd_vec[6:9] = self.kd / 10.0
 
         self.Kp_mtx = np.diag(self.Kp_vec)
         self.Kd_mtx = np.diag(self.Kd_vec)
@@ -113,19 +108,19 @@ class SwingLegCW(BaseRGCController):
         x, y, z, w = self.rs.epsilon
         T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
 
-        pivot_fr = self.pin_engine.frame_pos("FR", "hip")
-        pivot_rr = self.pin_engine.frame_pos("RR", "hip")
+        pivot_f = self.pin_engine.frame_pos("FL", "hip")
+        pivot_r = self.pin_engine.frame_pos("RL", "hip")
 
-        mean_pivot = 0.5 * (pivot_fr + pivot_rr)
+        mean_pivot = 0.5 * (pivot_f + pivot_r)
 
         Jc = np.zeros((12, 12))
         Sa = np.zeros((12, 3))
 
         pivot_map_pos = {
-            "FR": pivot_fr,
-            "FL": None,  # <-swing leg
-            "RR": pivot_rr,
-            "RL": None,  # <-swing leg
+            "FR": None,
+            "FL": pivot_f,  # <-swing leg
+            "RR": None,
+            "RL": pivot_r,  # <-swing leg
         }
 
         foot_positions = {}
@@ -143,10 +138,10 @@ class SwingLegCW(BaseRGCController):
             if pivot is not None:
                 Sa[3 * i:3 * (i + 1), :] = self.skew_symmetric_matrix(foot - pivot)
 
-        self.contacts[0, :] = foot_positions['FR']
-        self.contacts[1, :] = self.pin_engine.frame_pos('FR', 'thigh')
-        self.contacts[2, :] = self.pin_engine.frame_pos('RR', 'thigh')
-        self.contacts[3, :] = foot_positions['RR']
+        self.contacts[0, :] = foot_positions['FL']
+        self.contacts[1, :] = self.pin_engine.frame_pos('FL', 'thigh')
+        self.contacts[2, :] = self.pin_engine.frame_pos('RL', 'thigh')
+        self.contacts[3, :] = foot_positions['RL']
 
         M = self.pin_engine.actuated_mass_matrix()
 
@@ -157,12 +152,12 @@ class SwingLegCW(BaseRGCController):
 
         Lambda_swing = np.zeros((12, 12))
 
-        Lambda_swing[3:6, 3:6] = Lambda[3:6, 3:6]
-        Lambda_swing[9:12, 9:12] = Lambda[9:12, 9:12]
+        Lambda_swing[0:3, 0:3] = Lambda[0:3, 0:3]
+        Lambda_swing[6:9, 6:9] = Lambda[6:9, 6:9]
 
         gamma = Jc.copy()
-        gamma[3:6, 3:6] = np.eye(3)
-        gamma[9:12, 9:12] = np.eye(3)
+        gamma[0:3, 0:3] = np.eye(3)
+        gamma[6:9, 6:9] = np.eye(3)
 
         inv_gamma = np.linalg.inv(gamma)
 
@@ -189,12 +184,12 @@ class SwingLegCW(BaseRGCController):
 
         k3 = I_inv @ Sa.T @ self.Jinv
 
-        J_fl = self.pin_engine.linear_leg_jacobian('FL', 'foot')
+        J_f = self.pin_engine.linear_leg_jacobian('FR', 'foot')
 
-        J_rl = self.pin_engine.linear_leg_jacobian('RL', 'foot')
+        J_r = self.pin_engine.linear_leg_jacobian('RR', 'foot')
 
-        foot_fl = self.pin_engine.frame_pos('FL', 'foot')
-        foot_rl = self.pin_engine.frame_pos('RL', 'foot')
+        foot_f = self.pin_engine.frame_pos('FR', 'foot')
+        foot_r = self.pin_engine.frame_pos('RR', 'foot')
 
         self.A[0:3, 0:3] = -k3 @ k2
         self.A[0:3, 3:15] = -k3 @ k1
@@ -208,11 +203,11 @@ class SwingLegCW(BaseRGCController):
 
         self.A[18:22, 0:3] = T.reshape(4, 3)
 
-        self.A[23:26, 0:3] = self.skew_symmetric_matrix(foot_fl - mean_pivot)
-        self.A[23:26, 6:9] = -J_fl @ Lambda[3:6, 3:6]
+        self.A[23:26, 0:3] = self.skew_symmetric_matrix(foot_f - mean_pivot)
+        self.A[23:26, 3:6] = -J_f @ Lambda[0:3, 0:3]
 
-        self.A[26:29, 12:15] = -J_rl @ Lambda[9:12, 9:12]
-        self.A[26:29, 0:3] = self.skew_symmetric_matrix(foot_rl - mean_pivot)
+        self.A[26:29, 9:12] = -J_r@ Lambda[6:9, 6:9]
+        self.A[26:29, 0:3] = self.skew_symmetric_matrix(foot_r - mean_pivot)
 
         self.B[0:3, :] = k3 @ k1
 
@@ -220,8 +215,8 @@ class SwingLegCW(BaseRGCController):
 
         self.B[15:18, :] = J_com @ gamma_q_star
 
-        self.B[23:26, 3:6] = J_fl @ Lambda[3:6, 3:6]
-        self.B[26:29, 9:12] = J_rl @ Lambda[9:12, 9:12]
+        self.B[23:26, 0:3] = J_f @ Lambda[0:3, 0:3]
+        self.B[26:29, 6:9] = J_r @ Lambda[6:9, 6:9]
 
         self.Aa[0:self.nx, 0:self.nx] = np.identity(self.nx) + self.ts * self.A
         self.Aa[0:self.nx, self.nx:] = self.ts * self.B
@@ -229,7 +224,7 @@ class SwingLegCW(BaseRGCController):
         self.Ba[0:self.nx, :] = self.ts * self.B
 
         self.x = np.vstack((self.rs.omega.reshape(-1, 1), self.rs.q.reshape(-1, 1), self.rs.r_pos.reshape(-1, 1),
-                            self.rs.epsilon.reshape(-1, 1), -9.81, foot_fl.reshape(-1, 1), foot_rl.reshape(-1, 1),
+                            self.rs.epsilon.reshape(-1, 1), -9.81, foot_f.reshape(-1, 1), foot_r.reshape(-1, 1),
                             self.cs.qr.reshape(-1, 1)))
 
         self.Cc[18:, 0:3] = -self.Kd_mtx @ gamma_a_star
@@ -268,16 +263,19 @@ class SwingLegCW(BaseRGCController):
         if self.first_int:
             self.leg_path.update_geometry(sw_foot_front, sw_foot_rear, self.contacts)
             yaw = self.rs.rpy[2]
-            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
+            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
             epsRef = epsRef.reshape(4, 1)
             ref = np.vstack((self.qr.reshape(-1, 1), epsRef, np.zeros((3, 1)), np.zeros((3, 1))))
             self.ref = np.tile(ref, (self.N, 1))  # (N*ny, 1)
 
-        fl_ref = self.leg_path.get_front_ref(sw_foot_front)  # (N,3)
-        rl_ref = self.leg_path.get_rear_ref(sw_foot_rear)  # (N,3)
+        f_ref = self.leg_path.get_front_ref(sw_foot_front)  # (N,3)
+        r_ref = self.leg_path.get_rear_ref(sw_foot_rear)  # (N,3)
+
+        self.dg.sw_foot_data[0,:] = self.leg_path.ref_front.reshape(3,)
+        self.dg.sw_foot_data[1,:] = self.leg_path.ref_rear.reshape(3,)
 
         self.task_state.swing_foot_error[0:3] = (self.leg_path.ref_front.reshape(3, 1) - sw_foot_front).reshape(3,)
         self.task_state.swing_foot_error[3:6] = (self.leg_path.ref_rear.reshape(3, 1) - sw_foot_rear).reshape(3,)
 
-        self.ref.reshape(self.N, self.ny)[:, 10:13] = fl_ref
-        self.ref.reshape(self.N, self.ny)[:, 13:] = rl_ref
+        self.ref.reshape(self.N, self.ny)[:, 10:13] = f_ref
+        self.ref.reshape(self.N, self.ny)[:, 13:] = r_ref

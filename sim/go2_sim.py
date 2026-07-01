@@ -188,8 +188,6 @@ class Go2Sim:
 
         tau = tau_pd + tau_g
 
-        tau = tau_pd
-
         if not np.isfinite(tau).all():
             raise RuntimeError("Torque inválido")
 
@@ -197,7 +195,7 @@ class Go2Sim:
         self.low_level_state.tau_g = tau_g
         self.low_level_state.tau = tau
 
-        return np.clip(tau_pd + tau_g, -self.torque_limits, self.torque_limits)
+        return np.clip(tau_pd, -self.torque_limits, self.torque_limits)
 
     # ======================================================
     # PHYSICS
@@ -255,7 +253,7 @@ class Go2Sim:
         # ---------------------------
         if self.debug_viz is not None:
 
-            self.debug_viz.render(self.debug_state.sw_foot_data)
+            self.debug_viz.render(self.debug_state.sw_foot_data, self.debug_state.plane_pos, self.robot_state.rpy)
 
         self.viewer.sync()
 
