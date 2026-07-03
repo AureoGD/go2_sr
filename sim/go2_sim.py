@@ -195,7 +195,7 @@ class Go2Sim:
         self.low_level_state.tau_g = tau_g
         self.low_level_state.tau = tau
 
-        return np.clip(tau_pd, -self.torque_limits, self.torque_limits)
+        return np.clip(tau_pd + tau_g, -self.torque_limits, self.torque_limits)
 
     # ======================================================
     # PHYSICS

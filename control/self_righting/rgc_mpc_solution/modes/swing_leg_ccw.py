@@ -206,7 +206,7 @@ class SwingLegCCW(BaseRGCController):
         self.A[23:26, 0:3] = self.skew_symmetric_matrix(foot_f - mean_pivot)
         self.A[23:26, 3:6] = -J_f @ Lambda[0:3, 0:3]
 
-        self.A[26:29, 9:12] = -J_r@ Lambda[6:9, 6:9]
+        self.A[26:29, 9:12] = -J_r @ Lambda[6:9, 6:9]
         self.A[26:29, 0:3] = self.skew_symmetric_matrix(foot_r - mean_pivot)
 
         self.B[0:3, :] = k3 @ k1
@@ -270,9 +270,6 @@ class SwingLegCCW(BaseRGCController):
 
         f_ref = self.leg_path.get_front_ref(sw_foot_front)  # (N,3)
         r_ref = self.leg_path.get_rear_ref(sw_foot_rear)  # (N,3)
-
-        self.dg.sw_foot_data[0,:] = self.leg_path.ref_front.reshape(3,)
-        self.dg.sw_foot_data[1,:] = self.leg_path.ref_rear.reshape(3,)
 
         self.task_state.swing_foot_error[0:3] = (self.leg_path.ref_front.reshape(3, 1) - sw_foot_front).reshape(3,)
         self.task_state.swing_foot_error[3:6] = (self.leg_path.ref_rear.reshape(3, 1) - sw_foot_rear).reshape(3,)

@@ -53,19 +53,19 @@ class SettleCW(BaseRGCController):
         Q = block_diag(Qeps)
         self.Q = block_diag(*[Q] * self.N)
         # Update control action weight matrix
-        Rdqrfr = np.diag(np.array([1, 1, 1]))
-        Rdqrfl = np.diag(np.array([1, 1, 1]))
+        Rdqfr = np.diag(np.array([1, 0.15, 1]))
+        Rdqfl = np.diag(np.array([1, 1, 1]))
         Rdqrr = np.diag(np.array([1, 1, 1]))
         Rdqrl = np.diag(np.array([1, 1, 1]))
 
-        R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
+        R = block_diag(Rdqfr, Rdqfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
 
         self.Jinv = np.zeros((12, 12), dtype=np.float32)
 
-        self.contacts = np.zeros((5, 3), dtype=np.float32)
+        self.contacts = np.zeros((4, 3), dtype=np.float32)
 
         self.first_int = True
 
@@ -191,7 +191,7 @@ class SettleCW(BaseRGCController):
 
         _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
         self.Cc[22:, 15:17] = A_hex
-        
+
         pyramid_fric_matrix = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
         J = np.zeros((6, 6))
         J[0:3, 0:3] = self.Jinv[3:6, 3:6]

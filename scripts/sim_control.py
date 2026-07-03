@@ -24,24 +24,6 @@ mode = 'fsm'
 np.set_printoptions(linewidth=200)
 
 
-def dummy_time_base(tick):
-    if tick < 50:
-        action = 0
-    elif tick < 150:
-        action = 1
-    elif tick < 450:
-        action = 2
-    elif tick < 800:
-        action = 3
-    elif tick < 1050:
-        action = 4
-    elif tick < 1250:
-        action = 5
-    else:
-        action = 6
-    return action
-
-
 def main():
 
     root_joint = pin.JointModelFreeFlyer()
@@ -54,43 +36,35 @@ def main():
 
     conf_controller = {"pin_engine": pin_engine}
 
-    # if mode == 'time':
-    #     control = SchedulerTB(**conf_controller)
-    # else:
-    #     control = SchedulerRGCMPC(**conf_controller)
+    # FSM
+    control = SchedulerRGCMPC(**conf_controller)
 
-    control = SchedulerTB(**conf_controller)
+    # TSM
+    # control = SchedulerTB(**conf_controller)
+
+    # Unitree
     # control = UnitreeSelfRighting(**conf_controller)
 
     sim = Go2Sim(mj_model=model, mj_data=data, controller=control, pin_engine=pin_engine, viewer=viewer)
-    tsm = SelfRightingTSM()
-    b0 = [2.5, 0, 1]
-    # r0 = [0, 0, 0]
-    # q0 = [-0.0, 1.40, -2.72, -0.0, 1.40, -2.72, -0.0, 1.40, -2.72, -0.00, 1.4, -2.72]
 
-    r0 = [np.pi, 0, 0.1]
+    b0 = [2.5, 0, 0.5]
+    r0 = [np.pi, 0, -np.pi * 125 / 180]
     q0 = [-0.3, 1.0, -1.72, -0.5, 1.0, -1.72, 0.5, 1.40, -1.7, -0.5, 0.8, -1.5]
 
     sim.reset_robot_pose(b0=b0, r0=r0, q0=q0)
 
-    # robot_status = RobotStatus(sim.state, sim.controller.task_state, sim.torque_limits, sim.joint_limits)
-    # fsm = SelfRightingFSM(default='CCW')
+    robot_status = RobotStatus(sim.state, sim.controller.task_state, sim.torque_limits, sim.joint_limits)
+    fsm = SelfRightingFSM(default='CCW')
     last_action = -1
-    
+
     for tick in range(2000):
-        if tick<50:
+        if tick < 50:
             action = 0
         else:
-            action = tsm.step(sim.state.robot.rpy)
-        # if mode == 'time':
-        #     action = dummy_time_base(tick)
-        # elif mode == 'rgc':
-        #     action = dummy_rgc(tick)
-        # else:
-        #     action = fsm.update(robot_status)
-        # if last_action != action:
-        #     last_action = action
-        #     print(action)
+            # action = tsm.step(sim.state.robot.rpy)
+            action = fsm.update(robot_status)
+        if last_action != action:
+            last_action = action
         sim.simulation_loop(action)
 
 

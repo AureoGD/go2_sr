@@ -16,7 +16,10 @@ from control.self_righting.rgc_mpc_solution.modes.prone_cw import ProneCW
 from control.self_righting.rgc_mpc_solution.modes.prone_ccw import ProneCCW
 from control.self_righting.rgc_mpc_solution.modes.stand_up import StandUp
 
-CONTROLLER_CLASSES = [HoldPosition, GoSafe, PrepareCW, RollCW, SwingLegCW, SettleCW, ProneCW, StandUp, PrepareCCW, RollCCW, SwingLegCCW, SettleCCW, ProneCCW]
+CONTROLLER_CLASSES = [
+    HoldPosition, GoSafe, PrepareCW, RollCW, SwingLegCW, SettleCW, ProneCW, StandUp, PrepareCCW, RollCCW, SwingLegCCW,
+    SettleCCW, ProneCCW
+]
 
 
 class SchedulerRGCMPC(BaseSelfRighting):
@@ -87,5 +90,7 @@ class SchedulerRGCMPC(BaseSelfRighting):
 
     def reset_phase(self):
         self.task_state.last_controller = None
+        self.task_state.swing_foot_error = np.ones(6) * np.inf
+
         self.delta_qr[:] = 0.0
         self._controllers_initialized = False

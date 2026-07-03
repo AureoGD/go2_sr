@@ -43,7 +43,7 @@ class SettleCCW(BaseRGCController):
 
         # Body orientation
         self.Ca[:4, 18:22] = np.eye(4)
-        
+
         self.Cc[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
@@ -54,19 +54,19 @@ class SettleCCW(BaseRGCController):
         self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rdqrfr = np.diag(np.array([1, 1, 1]))
-        Rdqrfl = np.diag(np.array([1, 1, 1]))
+        Rdqfr = np.diag(np.array([1, 1, 1]))
+        Rdqfl = np.diag(np.array([1, 0.25, 1]))
         Rdqrr = np.diag(np.array([1, 1, 1]))
         Rdqrl = np.diag(np.array([1, 1, 1]))
 
-        R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)
+        R = block_diag(Rdqfr, Rdqfl, Rdqrr, Rdqrl)
         self.R = block_diag(*[R] * self.M)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
 
         self.Jinv = np.zeros((12, 12), dtype=np.float32)
 
-        self.contacts = np.zeros((5, 3), dtype=np.float32)
+        self.contacts = np.zeros((4, 3), dtype=np.float32)
 
         self.first_int = True
 
@@ -190,7 +190,7 @@ class SettleCCW(BaseRGCController):
         Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nc, self.nu))
 
-        _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
+        xy, r, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
         self.Cc[22:, 15:17] = A_hex
 
         pyramid_fric_matrix = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
@@ -218,6 +218,3 @@ class SettleCCW(BaseRGCController):
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
             self.ref = np.tile(epsRef.reshape(-1, 1), (self.N, 1))
-
-
-

@@ -2,11 +2,14 @@ import xml.etree.ElementTree as xml_et
 import numpy as np
 import cv2
 import noise
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 ROBOT = "go2"
-INPUT_SCENE_FILE = "/home/CCT/9791086/mujoco_sr/environment/terrain_tool/scene.xml"
-OUTPUT_SCENE_FILE = "/home/CCT/9791086/mujoco_sr/environment/unitree_go2/scene.xml"
-OUTPUT_SCENE_FOLDER = "/home/CCT/9791086/mujoco_sr/environment/unitree_go2/"
+INPUT_SCENE_FILE = SCRIPT_DIR / "scene.xml"
+OUTPUT_SCENE_FILE = SCRIPT_DIR.parent / "unitree_go2" / "scene.xml"
+OUTPUT_SCENE_FOLDER = SCRIPT_DIR.parent / "unitree_go2"
 
 
 # zyx euler angle to quaternion
@@ -160,11 +163,11 @@ class TerrainGenerator:
             position=[1.0, 0.0, 0.0],  # position
             euler=[0.0, -0.0, 0.0],  # attitude
             size=[1.0, 1.0],  # width and length
-            height_scale=0.2,  # max height
-            negative_height=0.2,  # height in the negative direction of z axis
+            height_scale=0.0001,  # max height
+            negative_height=0.001,  # height in the negative direction of z axis
             image_width=128,  # height field image size
             img_height=128,
-            smooth=100.0,  # smooth scale
+            smooth=10.0,  # smooth scale
             perlin_octaves=6,  # perlin noise parameter
             perlin_persistence=0.5,
             perlin_lacunarity=2.0,
@@ -184,7 +187,7 @@ class TerrainGenerator:
                                             lacunarity=perlin_lacunarity)
                 terrain_image[y, x] = int((noise_value + 1) / 2 * 255)
 
-        cv2.imwrite(OUTPUT_SCENE_FOLDER + output_hfield_image_, terrain_image)
+        cv2.imwrite(OUTPUT_SCENE_FOLDER / output_hfield_image_, terrain_image)
 
         hfield = xml_et.SubElement(self.asset, "hfield")
         hfield.attrib["name"] = f"perlin_hfield_{idx}"
@@ -204,8 +207,8 @@ class TerrainGenerator:
             position=[1.0, 0.0, 0.0],  # position
             euler=[0.0, -0.0, 0.0],  # attitude
             size=[2.0, 1.6],  # width and length
-            height_scale=0.02,  # max height
-            negative_height=0.1,  # height in the negative direction of z axis
+            height_scale=0.05,  # max height
+            negative_height=0.05,  # height in the negative direction of z axis
             input_img=None,
             output_hfield_image="height_field.png",
             image_scale=[1.0, 1.0],  # reduce image resolution
@@ -245,15 +248,15 @@ if __name__ == "__main__":
     lenght = 3
     wide = 3
 
+    # tg.AddPerlinHeighField(position=[0, wide, 0], size=[wide, wide], idx=1)
+
     # Flat terrain and 0º Perlin heigh field
     tg.AddBox(position=[0, 0, -0.025], euler=[0.0, 0, 0.0], size=[lenght, wide, 0.1])
-    tg.AddPerlinHeighField(position=[0, wide, 0], size=[wide, wide], idx=1)
 
     # 5º slope terrain and 5º Perlin heigh field
     ang = np.pi * 5 / 180
     z = -0.05 + lenght * np.sin(ang) / 2
     tg.AddBox(position=[wide + 0.25, 0, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
-    tg.AddPerlinHeighField(position=[wide + 0.25, wide, z], euler=[0.0, -ang, 0.0], size=[wide, wide], idx=0)
 
     # ang = np.pi * 5 / 180
     # z = -0.05 + lenght * np.sin(ang) / 2

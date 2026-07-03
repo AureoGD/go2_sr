@@ -78,6 +78,7 @@ class PrepareCW(BaseRGCController):
         self.R = block_diag(*[R] * self.M)
 
         qr = np.array([[-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, -1.025, 4.15, -2.2]]).transpose()
+
         ref = np.vstack((qr))
         self.ref = np.tile(ref, (self.N, 1))
 

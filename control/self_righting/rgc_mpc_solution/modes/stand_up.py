@@ -62,7 +62,7 @@ class StandUp(BaseRGCController):
 
         # Output weight matrix
         Q_rz = np.array([10])
-        Q_eps = 2.5 * np.eye(4)
+        Q_eps = 5 * np.eye(4)
         Q_dr = 1 * np.eye(3)
         Q_omega = 1 * np.eye(3)
         Q = block_diag(Q_rz, Q_eps, Q_dr, Q_omega)
@@ -221,7 +221,7 @@ class StandUp(BaseRGCController):
 
             # keep the currently yaw
             yaw = self.rs.rpy[2]
-            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
+            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
             epsRef = epsRef.reshape(4, 1)
 
             ref = np.vstack((rzRef, epsRef, np.zeros((3, 1)), np.zeros((3, 1))))

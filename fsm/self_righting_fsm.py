@@ -5,6 +5,7 @@ import numpy as np
 from env.normalizer import StateNormalizer
 from scipy.spatial.transform import Rotation
 
+
 class Controller(IntEnum):
     HOLD = 0
     GO_SAFE = 1
@@ -44,7 +45,7 @@ class RobotStatus:
     def is_upside_down(self):
         alpha = self.normalizer.compute_alpha(self.rs.epsilon)
         return alpha < -0.1
-    
+
     @property
     def roll_cw(self):
         rpy = self.rs.rpy
@@ -52,8 +53,8 @@ class RobotStatus:
         g_body = R_wb.T @ np.array([0, 0, -1])
         gy = g_body[1]
 
-        return gy<0
-    
+        return gy < 0
+
     @property
     def roll_ccw(self):
         rpy = self.rs.rpy
@@ -61,7 +62,7 @@ class RobotStatus:
         g_body = R_wb.T @ np.array([0, 0, -1])
         gy = g_body[1]
 
-        return gy>=0
+        return gy >= 0
 
     @property
     def is_upside(self):
@@ -75,7 +76,7 @@ class RobotStatus:
     @property
     def is_robot_prepared_cw(self):
         return all(abs(self.rs.q - self.PREPARED_CW) < 0.12) or (np.linalg.norm(self.lcs.dqr) < 0.001)
-    
+
     @property
     def is_robot_prepared_ccw(self):
         return all(abs(self.rs.q - self.PREPARED_CCW) < 0.12) or (np.linalg.norm(self.lcs.dqr) < 0.001)
@@ -112,7 +113,7 @@ class RobotStatus:
 
     @property
     def robot_proned(self):
-        return all(abs(self.rs.q - self.PRONE_POSITION) < 0.31)
+        return all(abs(self.rs.q - self.PRONE_POSITION) < 0.25)
 
     @property
     def stand_finish(self):
@@ -128,7 +129,7 @@ class SelfRightingFSM:
             self.default = Controller.PREPARE_CCW
         else:
             self.default = None
-        
+
         self._state = Controller.HOLD
 
     def update(self, status: RobotStatus) -> int:
@@ -159,7 +160,7 @@ class SelfRightingFSM:
             case Controller.PREPARE_CW:
                 if s.is_robot_prepared_cw:
                     return Controller.ROLL_CW
-                
+
             case Controller.PREPARE_CCW:
                 if s.is_robot_prepared_ccw:
                     return Controller.ROLL_CCW
@@ -175,7 +176,7 @@ class SelfRightingFSM:
             case Controller.SWING_LEG_CW:
                 if s.left_side_feet_touching:
                     return Controller.SETTLE_CW
-                
+
             case Controller.SWING_LEG_CCW:
                 if s.right_side_feet_touching:
                     return Controller.SETTLE_CCW
@@ -183,7 +184,7 @@ class SelfRightingFSM:
             case Controller.SETTLE_CW:
                 if s.is_upside:
                     return Controller.PRONE_CW
-            
+
             case Controller.SETTLE_CCW:
                 if s.is_upside:
                     return Controller.PRONE_CCW
@@ -192,7 +193,7 @@ class SelfRightingFSM:
                 if s.robot_proned:
                     s.set_initial_bz()
                     return Controller.STAND_UP
-                
+
             case Controller.PRONE_CCW:
                 if s.robot_proned:
                     s.set_initial_bz()

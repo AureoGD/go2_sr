@@ -67,20 +67,17 @@ class PrepareCCW(BaseRGCController):
         Qf = np.array([1, 0.05, 0.05])
         Qf = np.diag(Qf)
 
-        Q = block_diag(Qq, Qq, Qf,Qq)
+        Q = block_diag(Qq, Qq, Qf, Qq)
         self.Q = block_diag(*[Q] * self.N)
 
         Rdqr = np.array([10, 10, 10])
         Rdqr = np.diag(Rdqr)
         Rdqrf = np.array([0.1, 20, 5])
         Rdqrf = np.diag(Rdqrf)
-        R = block_diag(Rdqr, Rdqr, Rdqrf,Rdqr)
+        R = block_diag(Rdqr, Rdqr, Rdqrf, Rdqr)
         self.R = block_diag(*[R] * self.M)
 
-        qr = np.array([[0.8, 1.0, -2.6,
-                        0.6, 1.5, -2.0,
-                        1.025, 4.15, -2.2,
-                        0.6, 1.5, -2.0]]).transpose()
+        qr = np.array([[0.8, 1.0, -2.6, 0.6, 1.5, -2.0, 1.025, 4.15, -2.2, 0.6, 1.5, -2.0]]).transpose()
 
         ref = np.vstack((qr))
         self.ref = np.tile(ref, (self.N, 1))
@@ -100,7 +97,7 @@ class PrepareCCW(BaseRGCController):
         # Low-level mode controller gains
         # ----------------------------------------
 
-        self.Kp_vec = np.ones(12) * self.kp/2
+        self.Kp_vec = np.ones(12) * self.kp / 2
         self.Kd_vec = np.ones(12) * self.kd / 10
 
         self.kp_mtx = np.diag(self.Kp_vec)
