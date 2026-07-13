@@ -163,8 +163,8 @@ class TerrainGenerator:
             position=[1.0, 0.0, 0.0],  # position
             euler=[0.0, -0.0, 0.0],  # attitude
             size=[1.0, 1.0],  # width and length
-            height_scale=0.0001,  # max height
-            negative_height=0.001,  # height in the negative direction of z axis
+            height_scale=0.1,  # max height
+            negative_height=0.1,  # height in the negative direction of z axis
             image_width=128,  # height field image size
             img_height=128,
             smooth=10.0,  # smooth scale
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     lenght = 3
     wide = 3
 
-    # tg.AddPerlinHeighField(position=[0, wide, 0], size=[wide, wide], idx=1)
+    tg.AddPerlinHeighField(position=[0, wide, 0], size=[wide, wide], idx=1)
 
     # Flat terrain and 0º Perlin heigh field
     tg.AddBox(position=[0, 0, -0.025], euler=[0.0, 0, 0.0], size=[lenght, wide, 0.1])

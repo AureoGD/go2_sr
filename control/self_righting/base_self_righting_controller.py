@@ -14,6 +14,7 @@ class BaseSelfRighting(BaseController):
         # INTERNAL MEMORY
         # --------------------------------------
         self.dqr = np.zeros(12)
+        self.comp_grav = True
 
     # ======================================================
     # ACTION SPACE (default: discrete modes)

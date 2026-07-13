@@ -22,7 +22,7 @@ class RollCW(BaseRGCController):
         # Number of states, inputs, outputs and constarints
         self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 7  # joint pos (12, 1), body orientation (4, 1)
+        self.ny = 9  # joint pos (12, 1), body orientation (4, 1)
         self.nc = 35  # qr (12, 1), CoM projection (6, 1), dqr (12, 1), GRF
 
         # Dynamic matrices
@@ -41,27 +41,28 @@ class RollCW(BaseRGCController):
         self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
-        # self.Ca[:12, 3:15] = np.eye(12)
-        #
-
         self.Ca[:4, 18:22] = np.eye(4)
-        self.Ca[4:, 12:15] = np.eye(3)
+        self.Ca[4:7, 12:15] = np.eye(3)
+        self.Ca[7, 5] = 1
+        self.Ca[8, 11] = 1
 
         self.Cc[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
         Qq = 0.5 * np.diag(np.array([1, 1, 1]))
-        Qeps = 1 * np.diag(np.array([1, 1, 1, 1]))
+        Qeps = 0.8 * np.diag(np.array([1, 1, 1, 1]))
+        Qqp = np.array([0.2])
 
-        Q = block_diag(Qeps, Qq)
+        Q = block_diag(Qeps, Qq, Qqp, Qqp)
         self.Q = block_diag(*[Q] * self.N)
 
         # References
         qr = np.array([0.4, 3.75, -1.5]).reshape(3, 1)
         qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
+        qp = Qqp = np.array([0.4])
 
-        ref = np.vstack((qeps, qr))
+        ref = np.vstack((qeps, qr, qp, qp))
 
         self.ref = np.tile(ref, (self.N, 1))
 

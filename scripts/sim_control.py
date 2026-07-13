@@ -19,8 +19,6 @@ from control.self_righting.unitree_solution.unitree_solution import UnitreeSelfR
 from fsm.self_righting_fsm import RobotStatus, SelfRightingFSM
 from fsm.self_righting_tsm import SelfRightingTSM
 
-mode = 'fsm'
-
 np.set_printoptions(linewidth=200)
 
 
@@ -47,25 +45,28 @@ def main():
 
     sim = Go2Sim(mj_model=model, mj_data=data, controller=control, pin_engine=pin_engine, viewer=viewer)
 
-    b0 = [2.5, 0, 0.5]
-    r0 = [np.pi, 0, -np.pi * 125 / 180]
+    b0 = [0, 0, 0.5]
+    r0 = [np.pi, 0, 0]
     q0 = [-0.3, 1.0, -1.72, -0.5, 1.0, -1.72, 0.5, 1.40, -1.7, -0.5, 0.8, -1.5]
 
     sim.reset_robot_pose(b0=b0, r0=r0, q0=q0)
 
     robot_status = RobotStatus(sim.state, sim.controller.task_state, sim.torque_limits, sim.joint_limits)
-    fsm = SelfRightingFSM(default='CCW')
+    fsm = SelfRightingFSM(default='CW')
     last_action = -1
 
     for tick in range(2000):
-        if tick < 50:
+        if tick < 100:
             action = 0
         else:
+            # action = 1
             # action = tsm.step(sim.state.robot.rpy)
             action = fsm.update(robot_status)
         if last_action != action:
             last_action = action
         sim.simulation_loop(action)
+    
+
 
 
 if __name__ == "__main__":

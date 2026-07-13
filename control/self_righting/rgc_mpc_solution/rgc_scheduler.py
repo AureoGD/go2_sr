@@ -29,6 +29,8 @@ class SchedulerRGCMPC(BaseSelfRighting):
         kp = kwargs.get("kp", 50.0)
         kd = kwargs.get("kd", 3.0)
 
+        self.comp_grav = True
+
         self.Kp_vec = np.ones(12) * kp
         self.Kd_vec = np.ones(12) * kd
 

@@ -64,15 +64,10 @@ class SwingLegCW(BaseRGCController):
         Q = block_diag(Qr, Qr, Qeps, Qposfl, Qposrl)
         self.Q = block_diag(*[Q] * self.N)
 
-        # use latter to update self.Q
-        self.single_output_dim = 19  # = 19
-        self.idx_RL1 = slice(13, 16)  # = 13:16
-        self.idx_RL2 = slice(16, 19)  # = 16:19
-
         # Update control action weight matrix
-        Rdqrfr = 1000 * np.diag(np.array([1, 1, 1]))
+        Rdqrfr = 1000 * np.diag(np.array([1.3, 1, 1])) # original 1 1 1
         Rdqrfl = 40 * np.diag(np.array([1, 1, 1]))
-        Rdqrr = 1000 * np.diag(np.array([1, 1, 1]))
+        Rdqrr = 1000 * np.diag(np.array([1.3, 1, 1]))
         Rdqrl = 40 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqrfr, Rdqrfl, Rdqrr, Rdqrl)

@@ -28,7 +28,7 @@ class RobotStatus:
     PRONE_POSITION = np.array([0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7])
     PREPARED_CW = np.array([-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, -1.025, 4.15, -2.2])
     PREPARED_CCW = np.array([0.8, 1.0, -2.6, 0.6, 1.5, -2.0, 1.025, 4.15, -2.2, 0.6, 1.5, -2.0])
-    SAFE_THRESHOLD = 0.05  # radians tolerance
+    SAFE_THRESHOLD = 0.1  # radians tolerance
     PHASE_TIMEOUT = 10.0  # seconds
 
     def __init__(self, robot_state, controller_state, torque_lim, joint_lin):
@@ -36,10 +36,10 @@ class RobotStatus:
         self.lcs = robot_state.low_level
         self.hcs = controller_state
         self.normalizer = StateNormalizer(torque_limits=torque_lim, joint_limits=joint_lin)
-        self.bz0 = None
+        self.r0 = None
 
     def set_initial_bz(self):
-        self.bz0 = self.rs.b_pos[2]
+        self.r0 = self.rs.r_pos[2]
 
     @property
     def is_upside_down(self):
@@ -67,7 +67,7 @@ class RobotStatus:
     @property
     def is_upside(self):
         alpha = self.normalizer.compute_alpha(self.rs.epsilon)
-        return alpha > 0.9
+        return alpha > 0.85
 
     @property
     def joints_at_safe_position(self):
@@ -84,6 +84,10 @@ class RobotStatus:
     @property
     def left_rear_foot_touching(self):
         return bool(self.rs.foot_touching[3])
+    
+    @property
+    def right_rear_foot_touching(self):
+        return bool(self.rs.foot_touching[2])
 
     @property
     def all_foot_touching(self):
@@ -117,12 +121,13 @@ class RobotStatus:
 
     @property
     def stand_finish(self):
-        return self.rs.b_pos[2] - self.bz0 > 0.14
+        return self.rs.r_pos[2] - self.r0 > 0.1
 
 
 class SelfRightingFSM:
 
     def __init__(self, default=None):
+        self.a = False
         if default == 'CW':
             self.default = Controller.PREPARE_CW
         elif default == 'CCW':
@@ -130,6 +135,8 @@ class SelfRightingFSM:
         else:
             self.default = None
 
+
+        self.stand_flag = False
         self._state = Controller.HOLD
 
     def update(self, status: RobotStatus) -> int:
@@ -138,6 +145,7 @@ class SelfRightingFSM:
         return int(self._state)
 
     def reset(self):
+        self.stand_flag = False
         self._state = Controller.HOLD
 
     def _next_state(self, s: RobotStatus) -> Controller:
@@ -166,11 +174,11 @@ class SelfRightingFSM:
                     return Controller.ROLL_CCW
 
             case Controller.ROLL_CW:
-                if s.right_side_feet_touching:
+                if not s.left_rear_foot_touching or s.right_side_feet_touching:
                     return Controller.SWING_LEG_CW
 
             case Controller.ROLL_CCW:
-                if s.left_side_feet_touching:
+                if not s.right_rear_foot_touching or s.left_side_feet_touching:
                     return Controller.SWING_LEG_CCW
 
             case Controller.SWING_LEG_CW:
@@ -201,7 +209,7 @@ class SelfRightingFSM:
 
             case Controller.STAND_UP:
                 if s.stand_finish:
-                    self.reset()
-                    return Controller.HOLD
+                    self.stand_flag = True
+                    return Controller.STAND_UP
 
         return self._state

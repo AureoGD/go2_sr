@@ -52,9 +52,11 @@ class GoSafe(BaseRGCController):
         Qq = 1 * np.eye(12)
         self.Q = block_diag(*[Qq] * self.N)
 
-        dqrWeight = 100 * np.array([1, 1, 1])
-        Rdqr = np.diag(dqrWeight)
-        R = block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
+        dqrWfr = np.diag(150 * np.array([1, 1, 1]))
+        dqrWfl = np.diag(300 * np.array([1, 1, 1]))
+        dqrWrr = np.diag(450 * np.array([1, 1, 1]))
+        dqrWrl = np.diag(600 * np.array([1, 1, 1]))
+        R = block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
         self.R = block_diag(*[R] * self.M)
 
         # ----------------------------------------

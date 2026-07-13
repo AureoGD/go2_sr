@@ -6,13 +6,14 @@ from sim.engine.pinocchio_engine import PinocchioEngine
 from sim.utils.transforms import euler_to_quat, quat_to_euler
 from sim.debug.debug_visualization import DebugVisualizer
 
+import copy
 
 class Go2Sim:
 
     # ======================================================
     # INIT
     # ======================================================
-    def __init__(self, mj_model, mj_data, controller=None, pin_engine=None, con_dt=0.01, dyn_dt=0.001, viewer=None):
+    def __init__(self, mj_model, mj_data, controller=None, pin_engine=None, con_dt=0.01, dyn_dt=0.001, viewer=None, log_ep=False):
 
         # -------------------------------
         # MuJoCo
@@ -72,6 +73,9 @@ class Go2Sim:
         # -------------------------------
         self.iterations = 0
 
+        self.log_ep = log_ep
+        self.log = []
+
     # ======================================================
     # MAIN LOOP
     # ======================================================
@@ -102,9 +106,13 @@ class Go2Sim:
 
             self._update_robot_state_from_mujoco()
 
-            # self.pin_engine.update(self.robot_state)
+            if self.log_ep:
 
-            # self._com_quantities()
+                self.pin_engine.update(self.robot_state)
+
+                self._com_quantities()
+
+                self.log.append(copy.deepcopy(self.state))
 
             # self._feet_quatities()
 
@@ -132,19 +140,6 @@ class Go2Sim:
         self.robot_state.r_vel = self.pin_engine.vcom()
 
     def _feet_quatities(self):
-        # self.robot_state.foot_contacts = self.pin_engine.feet_positions_array().reshape(12)
-        # current_contacts = self.mj_data.contact.geom1
-        # contact_list = []
-        # for i in range(len(current_contacts)):
-        #     contact_name = self.mj_model.geom(current_contacts[i]).name
-        #     if contact_name != '':
-        #         contact_list.append(contact_name)
-        # foot_names = ['FR', 'FL', 'RR', 'RL']
-        # for idx, foot in enumerate(foot_names):
-        #     if foot in contact_list:
-        #         self.robot_state.foot_touching[idx] = 1
-        #     else:
-        #         self.robot_state.foot_touching[idx] = 0
         foot_map = {'FR': 0, 'FL': 1, 'RR': 2, 'RL': 3}
 
         self.robot_state.foot_touching[:] = 0
@@ -186,16 +181,16 @@ class Go2Sim:
         tau_pd = KP * q_error + KD * dq_error
         tau_g = self.pin_engine.gravity()
 
-        tau = tau_pd + tau_g
-
-        if not np.isfinite(tau).all():
-            raise RuntimeError("Torque inválido")
-
+        if self.controller.comp_grav:
+            tau = tau_pd+tau_g
+        else:
+            tau = tau_pd
+        
         self.low_level_state.tau_pd = tau_pd
         self.low_level_state.tau_g = tau_g
         self.low_level_state.tau = tau
 
-        return np.clip(tau_pd + tau_g, -self.torque_limits, self.torque_limits)
+        return np.clip(tau, -self.torque_limits, self.torque_limits)
 
     # ======================================================
     # PHYSICS
@@ -321,3 +316,5 @@ class Go2Sim:
                 self.controller.reset()
 
         self.iterations = 0
+
+        self.log.clear()

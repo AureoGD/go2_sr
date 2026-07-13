@@ -25,7 +25,7 @@ class StandUp(BaseRGCController):
 
         self.nx = 26  # CoM lin vel (3, 1), CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 11  # CoM z position (1, 1), body orientation (4, 1), CoM linear vel. (3, 1), and CoM ang. vel. (3, 1)
+        self.ny = 13  # CoM z position (1, 1), body orientation (4, 1), CoM linear vel. (3, 1), and CoM ang. vel. (3, 1)
         self.nc = 38  # ground reaction forces (20, 1), qr (12, 1), CoM projection (6, 1)
 
         # Dynamic matrices
@@ -48,10 +48,10 @@ class StandUp(BaseRGCController):
         self.Ba[26:, :] = np.identity(self.nu)
 
         # OUTPUT MATRIX:
-        self.Ca[0, 20] = 1  # z com pos
-        self.Ca[1:5, 21:25] = np.identity(4)  # epsilon
-        self.Ca[5:8, 0:3] = np.identity(3)  # com lin vel
-        self.Ca[8:, 3:6] = np.identity(3)  # com ang vel
+        self.Ca[0:3, 18:21] = np.identity(3)   # z com pos
+        self.Ca[3:7, 21:25] = np.identity(4)  # epsilon
+        self.Ca[7:10, 0:3] = np.identity(3)  # com lin vel
+        self.Ca[10:, 3:6] = np.identity(3)  # com ang vel
 
         # Joint position constrain
         self.Cc[26:, 26:] = np.identity(12)
@@ -61,7 +61,7 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
 
         # Output weight matrix
-        Q_rz = np.array([10])
+        Q_rz = np.diag(np.array([0.25, 0.5, 10]))
         Q_eps = 5 * np.eye(4)
         Q_dr = 1 * np.eye(3)
         Q_omega = 1 * np.eye(3)
@@ -80,7 +80,7 @@ class StandUp(BaseRGCController):
         # Constraints
         # ----------------------------------------
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 30])
-        foot_u = np.array([0, 0, np.inf, np.inf, 100])
+        foot_u = np.array([0, 0, np.inf, np.inf, 150])
 
         # Stack for all 4 feet
         self.f_l = np.tile(foot_l.reshape(-1, 1), (4, 1))
@@ -91,7 +91,7 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
         # Controller specific variables and objects
         # ----------------------------------------
-        self.z_ref = np.array([[0.15]]).reshape(1, 1)
+        self.z_ref = np.array([[0.20]]).reshape(1, 1)
 
         self.L = np.zeros((12, 38), dtype=np.float32)
         self.L[:, 6:18] = -self.kp * np.identity(12)
@@ -195,7 +195,8 @@ class StandUp(BaseRGCController):
 
         if self.first_cont_interation:
 
-            _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
+            _xy, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
+            self.ref.reshape(self.N, self.ny)[:,0:2]=_xy.reshape(2,) 
             self.Cc[20:26, 18:20] = A_hex
 
             l = np.vstack((self.f_l.reshape(-1, 1), self.com_const.reshape(-1, 1), self.q_min.reshape(-1, 1)))
@@ -224,6 +225,6 @@ class StandUp(BaseRGCController):
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
             epsRef = epsRef.reshape(4, 1)
 
-            ref = np.vstack((rzRef, epsRef, np.zeros((3, 1)), np.zeros((3, 1))))
+            ref = np.vstack((np.zeros((2, 1)), rzRef, epsRef, np.zeros((3, 1)), np.zeros((3, 1))))
 
             self.ref = np.tile(ref, (self.N, 1))

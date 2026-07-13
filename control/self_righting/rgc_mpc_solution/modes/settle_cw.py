@@ -22,7 +22,7 @@ class SettleCW(BaseRGCController):
         # Number of states, inputs, outputs and constarints
         self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 4  # joint pos (12, 1), body orientation (4, 1)
+        self.ny = 6  # joint pos (2, 1), body orientation (4, 1)
         self.nc = 28  # qr (12, 1), CoM projection (6, 1)
 
         # Dynamic matrices
@@ -42,18 +42,21 @@ class SettleCW(BaseRGCController):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:, 18:22] = np.eye(4)
+        self.Ca[:4, 18:22] = np.eye(4)
+        self.Ca[4,3] = 1
+        self.Ca[5,7] = 1
 
         self.Cc[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
         Qeps = 0.2 * np.diag(np.array([1, 1, 1, 1]))
+        Qq = 0.001 * np.diag(np.array([1, 1]))
 
-        Q = block_diag(Qeps)
+        Q = block_diag(Qeps, Qq)
         self.Q = block_diag(*[Q] * self.N)
         # Update control action weight matrix
-        Rdqfr = np.diag(np.array([1, 0.15, 1]))
+        Rdqfr = np.diag(np.array([1, 1, 1]))
         Rdqfl = np.diag(np.array([1, 1, 1]))
         Rdqrr = np.diag(np.array([1, 1, 1]))
         Rdqrl = np.diag(np.array([1, 1, 1]))
@@ -214,5 +217,6 @@ class SettleCW(BaseRGCController):
     def build_reference(self):
         if self.first_int:
             yaw = self.rs.rpy[2]
-            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None)
-            self.ref = np.tile(epsRef.reshape(-1, 1), (self.N, 1))
+            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
+            ref = np.vstack((epsRef.reshape(-1, 1), np.array([2.7]), np.array([2.7])))
+            self.ref = np.tile(ref, (self.N, 1))

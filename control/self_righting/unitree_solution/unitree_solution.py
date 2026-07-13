@@ -7,6 +7,8 @@ class UnitreeSelfRighting(BaseSelfRighting):
     def __init__(self, **kwargs):
         super().__init__()
 
+        self.comp_grav = False
+
         self.kp = kwargs.get('kp', 80)
         self.kd = kwargs.get('kd', 5)
 
@@ -44,6 +46,9 @@ class UnitreeSelfRighting(BaseSelfRighting):
         self.phase_iterations = 0
         self.phase_now = 0
 
+        self.KP = np.array([80] * 12)
+        self.KD = np.array([1] * 12)
+
     def before_step(self, state, action):
         cs = state.low_level
         rs = state.robot
@@ -62,41 +67,42 @@ class UnitreeSelfRighting(BaseSelfRighting):
         # Unitree strategy IGNORES the 'mode' input from NN
         # because it follows a strict time schedule.
         dqr = np.zeros((12,1))
-        if self.iterations < sum(self.phase_duration):
-            # Init Phase
-            if self.phase_iterations == 0:
-                # Initialize qr_ant if it's the very first step
-                if self.iterations == 0 and state is not None:
-                    self.qr_ant = state.low_level.qr.reshape(12, 1)
+        if action == 1:
+            if self.iterations < sum(self.phase_duration):
+                # Init Phase
+                if self.phase_iterations == 0:
+                    # Initialize qr_ant if it's the very first step
+                    if self.iterations == 0 and state is not None:
+                        self.qr_ant = state.low_level.qr.reshape(12, 1)
 
-                target = self.sr_q_refs[self.phase_now].reshape(12, 1)
-                duration = self.ramp_duration[self.phase_now]
+                    target = self.sr_q_refs[self.phase_now].reshape(12, 1)
+                    duration = self.ramp_duration[self.phase_now]
 
-                self.increment_per_step = (target - self.qr_ant.reshape(12, 1)) / duration
-                self.KP = self.kp_per_phase[self.phase_now]
-                self.KD = self.kd_per_phase[self.phase_now]
+                    self.increment_per_step = (target - self.qr_ant.reshape(12, 1)) / duration
+                    self.KP = self.kp_per_phase[self.phase_now]
+                    self.KD = self.kd_per_phase[self.phase_now]
 
-            # Interpolate
-            if self.phase_iterations < self.ramp_duration[self.phase_now]:
-                dqr = self.increment_per_step
+                # Interpolate
+                if self.phase_iterations < self.ramp_duration[self.phase_now]:
+                    dqr = self.increment_per_step
 
 
-            self.phase_iterations += 1
+                self.phase_iterations += 1
 
-            # Advance Phase
-            if self.phase_iterations >= self.phase_duration[self.phase_now]:
-                self.phase_iterations = 0
-                self.phase_now += 1
+                # Advance Phase
+                if self.phase_iterations >= self.phase_duration[self.phase_now]:
+                    self.phase_iterations = 0
+                    self.phase_now += 1
 
-        self.iterations += 1
+            self.iterations += 1
         return dqr.reshape(12), self.KP, self.KD
 
     def reset_phase(self):
         self.iterations = 0
         self.phase_iterations = 0
         self.phase_now = 0
-        self.KP = self.kp * np.eye(12)
-        self.KD = self.kd * np.eye(12)
+        self.KP = np.array([80] * 12)
+        self.KD = np.array([1] * 12)
 
     def get_num_modes(self):
         pass

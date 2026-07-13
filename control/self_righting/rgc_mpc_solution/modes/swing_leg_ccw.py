@@ -56,10 +56,10 @@ class SwingLegCCW(BaseRGCController):
         # Weights
         # ----------------------------------------
 
-        Qr = 10 * np.diag(np.array([1, 1, 1]))  # FR and RR joints
+        Qr = 10 * np.diag(np.array([1, 1, 1]))  # FL and RL joints
         Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
-        Qposf = 1.5 * np.diag(np.array([6, 6, 4]))  # FL foot (P1)
-        Qposr = 1.5 * np.diag(np.array([6, 6, 4]))  # RL foot (P2)
+        Qposf = 1.5 * np.diag(np.array([6, 6, 4]))  # FR foot (P1)
+        Qposr = 1.5 * np.diag(np.array([6, 6, 4]))  # RR foot (P2)
 
         Q = block_diag(Qr, Qr, Qeps, Qposf, Qposr)
         self.Q = block_diag(*[Q] * self.N)

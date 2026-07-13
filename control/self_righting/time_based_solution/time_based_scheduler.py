@@ -30,7 +30,7 @@ class SchedulerTB(BaseSelfRighting):
     # ======================================================
     def __init__(self, stochastic=False, **kwargs):
         super().__init__()
-
+        self.comp_grav = True
         self.stochastic = stochastic
 
         self.task_state = TimeBasedState()
