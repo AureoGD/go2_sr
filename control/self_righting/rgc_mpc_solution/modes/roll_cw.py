@@ -4,6 +4,7 @@ from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
 from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
+from control.self_righting.rgc_mpc_solution.constraints.support_polytope import support_polytope
 from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
 
 
@@ -52,13 +53,14 @@ class RollCW(BaseRGCController):
 
         Qq = 0.5 * np.diag(np.array([1, 1, 1]))
         Qeps = 0.8 * np.diag(np.array([1, 1, 1, 1]))
-        Qqp = np.array([0.2])
+        Qqp = np.array([0.4])
 
         Q = block_diag(Qeps, Qq, Qqp, Qqp)
         self.Q = block_diag(*[Q] * self.N)
 
         # References
-        qr = np.array([0.4, 3.75, -1.5]).reshape(3, 1)
+        qr = np.array([0.6, 3.75, -1.5]).reshape(3, 1)
+        # qr = np.array([0.9, 4.25, -1.5]).reshape(3, 1)
         qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
         qp = Qqp = np.array([0.4])
 
@@ -67,9 +69,9 @@ class RollCW(BaseRGCController):
         self.ref = np.tile(ref, (self.N, 1))
 
         # Control action weight matrix
-        R_pivot = np.diag(np.array([1000, 1000, 1000]))
+        R_pivot = np.diag(np.array([500, 1000, 1000]))
         R_fixed = np.diag(np.array([1, 1, 1]))
-        R_rear = np.diag(np.array([0.1, 0.1, 0.1]))
+        R_rear = np.diag(np.array([0.1, 0.1, 0.01]))
 
         R = block_diag(R_pivot, R_fixed, R_pivot, R_rear)
         self.R = block_diag(*[R] * self.M)
@@ -102,10 +104,9 @@ class RollCW(BaseRGCController):
         # Constraints
         # ----------------------------------------
 
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 0.001])
-        foot_u = np.array([0, 0, np.inf, np.inf, 300])
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
+        foot_u = np.array([0, 0, np.inf, np.inf, 150])
 
-        # Stack for all 2 feet
         self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))
         self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))
 
@@ -131,11 +132,18 @@ class RollCW(BaseRGCController):
             "RL": mean_pivot,
         }
 
+        pivot_jac = {
+            "FR": self.pin_engine.linear_leg_jacobian("FR", "thigh"),
+            "FL": np.zeros((3, 3)),  # <-inative
+            "RR": self.pin_engine.linear_leg_jacobian("RR", "thigh"),
+            "RL": self.pin_engine.linear_leg_jacobian("RR", "thigh"),
+        }
+
         foot_positions = {}
         for i, leg in enumerate(self.leg_names):
             s = slice(3 * i, 3 * (i + 1))
 
-            Jc[s, s] = self.pin_engine.linear_leg_jacobian(leg, "foot")
+            Jc[s, s] = self.pin_engine.linear_leg_jacobian(leg, "foot") - pivot_jac[leg]
 
             foot = self.pin_engine.frame_pos(leg, "foot")
 
@@ -205,16 +213,28 @@ class RollCW(BaseRGCController):
 
         fric_cons_contacts = np.vstack((self.contacts[4, :], self.contacts[3, :], self.contacts[0, :]))
 
-        pyramid_fric_matrix = pyramid_friction(fric_cons_contacts, 0.7 / np.sqrt(2))
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(fric_cons_contacts, 0.7 / np.sqrt(2))
+        self.rs.grf_n[:] = np.inf
+        self.rs.grf_n[3] = n_l[0]
+        self.rs.grf_t1[3] = t1_l[0]
+        self.rs.grf_t2[3] = t2_l[0]
+
         self.Cc[30:, :] = -pyramid_fric_matrix[0:5, 0:3] @ self.Jinv[9:12, 9:12] @ self.Cc[27:30, :]
 
+        self.rs.force_est[3] = -self.Jinv[9:12, 9:12] @ self.cs.tau_pd[9:12]
+
         if self.first_int:
-            _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
-            self.Cc[12:18, 15:17] = A_hex
+            xy, r, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
+            # self.Cc[12:18, 15:17] = A_hex
+            A, b = support_polytope(self.contacts)
+            self.Cc[12:18, 15:17] = A
             l = np.vstack((self.q_min.reshape(-1, 1), -self.com_const.reshape(-1, 1), self.tau_min.reshape(-1, 1),
                            self.f_l.reshape(-1, 1)))
             u = np.vstack(
-                (self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), self.tau_max.reshape(-1, 1), self.f_u.reshape(-1, 1)))
+                (self.q_max.reshape(-1, 1), b.reshape(-1, 1), self.tau_max.reshape(-1, 1), self.f_u.reshape(-1, 1)))
+
+            # u = np.vstack((self.q_max.reshape(-1, 1), self.com_const.reshape(-1, 1), self.tau_max.reshape(-1, 1),
+            #                self.f_u.reshape(-1, 1)))
 
             self.l = np.tile(l, (self.N, 1))
             self.u = np.tile(u, (self.N, 1))
