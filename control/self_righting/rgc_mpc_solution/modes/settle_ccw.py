@@ -23,7 +23,8 @@ class SettleCCW(BaseRGCController):
         self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
         self.ny = 6  # joint pos (12, 1), body orientation (4, 1)
-        self.nc = 28  # qr (12, 1), CoM projection (6, 1)
+
+        self.nch = 28  # qr (12, 1), CoM projection (6, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -32,21 +33,21 @@ class SettleCCW(BaseRGCController):
         # Aumented matrices
         self.Aa = np.zeros((self.nx + self.nu, self.nx + self.nu), dtype=np.float32)
         self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
-        self.Ca = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
+        self.Cy = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
 
         # Constraint matrix
-        self.Cc = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
+        self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
 
         # Initialize constans
         self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Ca[:4, 18:22] = np.eye(4)
-        self.Ca[4,6] = 1
-        self.Ca[5,10] = 1
+        self.Cy[:4, 18:22] = np.eye(4)
+        self.Cy[4,6] = 1
+        self.Cy[5,10] = 1
 
-        self.Cc[0:12, 23:] = np.identity(12)
+        self.Cch[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
@@ -57,12 +58,10 @@ class SettleCCW(BaseRGCController):
         self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rdqfr = np.diag(np.array([1, 1, 1]))
-        Rdqfl = np.diag(np.array([1, 1, 1]))
-        Rdqrr = np.diag(np.array([1, 1, 1]))
-        Rdqrl = np.diag(np.array([1, 1, 1]))
+        Rp = np.diag(np.array([1, 1, 1]))
+        Rs = np.diag(np.array([1, 1, 1]))
 
-        R = block_diag(Rdqfr, Rdqfl, Rdqrr, Rdqrl)
+        R = block_diag(2*Rs, 0.75*Rp,2*Rs, Rp)
         self.R = block_diag(*[R] * self.M)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
@@ -89,7 +88,7 @@ class SettleCCW(BaseRGCController):
         # Constraints
         # ----------------------------------------
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
-        foot_u = np.array([0, 0, np.inf, np.inf, 150])
+        foot_u = np.array([0, 0, np.inf, np.inf, 75])
 
         # Stack for all 2 feet
         self.f_l = np.tile(foot_l.reshape(-1, 1), (2, 1))
@@ -188,30 +187,30 @@ class SettleCCW(BaseRGCController):
         self.L[0:3, 0:3] = -self.kd * gamma_a_star[0:3, :]
         self.L[3:6, 0:3] = -self.kd * gamma_a_star[6:9, :]
 
-    def build_output_constraint_matrices(self):
+    def build_hard_constraint_matrices(self):
 
-        Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
-        aux_cons = np.zeros((self.nc, self.nu))
+        Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.nch, self.nu))
 
         xy, r, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:4, :])
-        self.Cc[22:, 15:17] = A_hex
+        self.Cch[22:, 15:17] = A_hex
 
-        pyramid_fric_matrix = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
         J = np.zeros((6, 6))
         J[0:3, 0:3] = self.Jinv[0:3, 0:3]
         J[3:6, 3:6] = self.Jinv[6:9, 6:9]
-        self.Cc[12:22, :] = -pyramid_fric_matrix[0:10, 0:6] @ J @ self.L
+        self.Cch[12:22, :] = -pyramid_fric_matrix[0:10, 0:6] @ J @ self.L
 
-        Phi_cons[0:self.nc, :] = self.Cc @ self.Aa
-        aux_cons = self.Cc @ self.Ba
+        Phi_cons[0:self.nch, :] = self.Cch @ self.Aa
+        aux_cons = self.Cch @ self.Ba
 
         if self.first_int:
 
             l = np.vstack((self.q_min.reshape(-1, 1), self.f_l.reshape(-1, 1), -self.com_const.reshape(-1, 1)))
             u = np.vstack((self.q_max.reshape(-1, 1), self.f_u.reshape(-1, 1), b_hex.reshape(-1, 1)))
 
-            self.l = np.tile(l, (self.N, 1))
-            self.u = np.tile(u, (self.N, 1))
+            self.lch = np.tile(l, (self.N, 1))
+            self.uch = np.tile(u, (self.N, 1))
             self.first_int = False
 
         return aux_cons, Phi_cons

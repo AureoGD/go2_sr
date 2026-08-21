@@ -24,11 +24,20 @@ class Controller(IntEnum):
 
 class RobotStatus:
 
+    # Go safe constants
     SAFE_POSITION = np.array([0.7, 1.4, -2.6, -0.7, 1.4, -2.6, 0.7, 1.4, -2.6, -0.7, 1.4, -2.6])
+    SAFE_THRESHOLD = 0.15  # radians tolerance
+
+    # Preparation constants
+    NORMAL_MIN_LOAD = 30.0
+    PREPARED_Q_CW = np.array([-1.02, 4.15, -2.20])
+    PREPARED_Q_CCW = np.array([1.02, 4.15, -2.20])
+    PREPARE_JOINT_THRESHOLD = 0.2
+    PREPARE_CONTACT_COUNT_THRESHOLD = 5
+
     PRONE_POSITION = np.array([0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7])
-    PREPARED_CW = np.array([-0.6, 1.5, -2.0, -0.8, 1.0, -2.6, -0.6, 1.5, -2.0, -1.025, 4.15, -2.2])
-    PREPARED_CCW = np.array([0.8, 1.0, -2.6, 0.6, 1.5, -2.0, 1.025, 4.15, -2.2, 0.6, 1.5, -2.0])
-    SAFE_THRESHOLD = 0.1  # radians tolerance
+    PRONE_THRESHOLD = 0.5
+
     PHASE_TIMEOUT = 10.0  # seconds
 
     def __init__(self, robot_state, controller_state, torque_lim, joint_lin):
@@ -37,6 +46,12 @@ class RobotStatus:
         self.hcs = controller_state
         self.normalizer = StateNormalizer(torque_limits=torque_lim, joint_limits=joint_lin)
         self.r0 = None
+        self.rear_foot_not_touching_count = 0
+
+        self.fr_shoulder_contact_count = 0
+        self.fl_shoulder_contact_count = 0
+        self.rr_shoulder_contact_count = 0
+        self.rl_shoulder_contact_count = 0
 
     def set_initial_bz(self):
         self.r0 = self.rs.r_pos[2]
@@ -67,24 +82,64 @@ class RobotStatus:
     @property
     def is_upside(self):
         alpha = self.normalizer.compute_alpha(self.rs.epsilon)
-        return alpha > 0.85
+        return alpha > 0.95
 
     @property
     def joints_at_safe_position(self):
         return all(abs(self.rs.q - self.SAFE_POSITION) < self.SAFE_THRESHOLD)
 
     @property
-    def is_robot_prepared_cw(self):
-        return all(abs(self.rs.q - self.PREPARED_CW) < 0.12) or (np.linalg.norm(self.lcs.dqr) < 0.001)
+    def is_fr_shoulder_loaded(self):
+        if np.linalg.norm(self.rs.force_shoulder[0, :]) > self.NORMAL_MIN_LOAD:
+            self.fr_shoulder_contact_count += 1
+        if self.fr_shoulder_contact_count > self.PREPARE_CONTACT_COUNT_THRESHOLD:
+            return True
+        else:
+            return False
 
     @property
-    def is_robot_prepared_ccw(self):
-        return all(abs(self.rs.q - self.PREPARED_CCW) < 0.12) or (np.linalg.norm(self.lcs.dqr) < 0.001)
+    def is_fl_shoulder_loaded(self):
+        if np.linalg.norm(self.rs.force_shoulder[1, :]) > self.NORMAL_MIN_LOAD:
+            self.fl_shoulder_contact_count += 1
+        if self.fl_shoulder_contact_count > self.PREPARE_CONTACT_COUNT_THRESHOLD:
+            return True
+        else:
+            return False
+
+    @property
+    def is_rr_shoulder_loaded(self):
+        if np.linalg.norm(self.rs.force_shoulder[2, :]) > self.NORMAL_MIN_LOAD:
+            self.rr_shoulder_contact_count += 1
+        if self.rr_shoulder_contact_count > self.PREPARE_CONTACT_COUNT_THRESHOLD:
+            return True
+        else:
+            return False
+
+    @property
+    def is_rl_shoulder_loaded(self):
+        if np.linalg.norm(self.rs.force_shoulder[3, :]) > self.NORMAL_MIN_LOAD:
+            self.rl_shoulder_contact_count += 1
+        if self.rl_shoulder_contact_count > self.PREPARE_CONTACT_COUNT_THRESHOLD:
+            return True
+        else:
+            return False
+
+    @property
+    def is_rl_leg_prepared2roll(self):
+        return all(abs(self.rs.q[9:] - self.PREPARED_Q_CW) < self.PREPARE_JOINT_THRESHOLD)
+
+    @property
+    def is_rr_leg_prepared2roll(self):
+        return all(abs(self.rs.q[6:9] - self.PREPARED_Q_CCW) < self.PREPARE_JOINT_THRESHOLD)
 
     @property
     def left_rear_foot_touching(self):
         return bool(self.rs.foot_touching[3])
-    
+
+    @property
+    def cp_com_crossed(self):
+        return self.hcs.cp_trig_signal
+
     @property
     def right_rear_foot_touching(self):
         return bool(self.rs.foot_touching[2])
@@ -99,8 +154,8 @@ class RobotStatus:
         rear = bool(self.rs.foot_touching[2])
 
         if not np.any(np.isinf(self.hcs.swing_foot_error)):
-            front |= bool(np.linalg.norm(self.hcs.swing_foot_error[0:3]) < 0.05)
-            rear |= bool(np.linalg.norm(self.hcs.swing_foot_error[3:6]) < 0.05)
+            front |= bool(np.linalg.norm(self.hcs.swing_foot_error[0:3]) < 0.095)
+            rear |= bool(np.linalg.norm(self.hcs.swing_foot_error[3:6]) < 0.095)
 
         return front and rear
 
@@ -110,14 +165,18 @@ class RobotStatus:
         rear = bool(self.rs.foot_touching[3])
 
         if not np.any(np.isinf(self.hcs.swing_foot_error)):
-            front |= bool(np.linalg.norm(self.hcs.swing_foot_error[0:3]) < 0.05)
-            rear |= bool(np.linalg.norm(self.hcs.swing_foot_error[3:6]) < 0.05)
+            front |= bool(np.linalg.norm(self.hcs.swing_foot_error[0:3]) < 0.095)
+            rear |= bool(np.linalg.norm(self.hcs.swing_foot_error[3:6]) < 0.095)
 
         return front and rear
 
     @property
+    def prone_final_stage(self):
+        return self.hcs.prone_final_stage
+
+    @property
     def robot_proned(self):
-        return all(abs(self.rs.q - self.PRONE_POSITION) < 0.25)
+        return all(abs(self.rs.q - self.PRONE_POSITION) < self.PRONE_THRESHOLD)
 
     @property
     def stand_finish(self):
@@ -134,7 +193,6 @@ class SelfRightingFSM:
             self.default = Controller.PREPARE_CCW
         else:
             self.default = None
-
 
         self.stand_flag = False
         self._state = Controller.HOLD
@@ -166,19 +224,19 @@ class SelfRightingFSM:
                             return Controller.PREPARE_CCW
 
             case Controller.PREPARE_CW:
-                if s.is_robot_prepared_cw:
+                if s.is_fr_shoulder_loaded and s.is_rr_shoulder_loaded and s.is_rl_leg_prepared2roll:
                     return Controller.ROLL_CW
 
             case Controller.PREPARE_CCW:
-                if s.is_robot_prepared_ccw:
+                if s.is_fl_shoulder_loaded and s.is_rl_shoulder_loaded and s.is_rr_leg_prepared2roll:
                     return Controller.ROLL_CCW
 
             case Controller.ROLL_CW:
-                if not s.left_rear_foot_touching or s.right_side_feet_touching:
+                if s.cp_com_crossed:
                     return Controller.SWING_LEG_CW
 
             case Controller.ROLL_CCW:
-                if not s.right_rear_foot_touching or s.left_side_feet_touching:
+                if s.cp_com_crossed:
                     return Controller.SWING_LEG_CCW
 
             case Controller.SWING_LEG_CW:
@@ -198,12 +256,12 @@ class SelfRightingFSM:
                     return Controller.PRONE_CCW
 
             case Controller.PRONE_CW:
-                if s.robot_proned:
+                if s.robot_proned and s.prone_final_stage:
                     s.set_initial_bz()
                     return Controller.STAND_UP
 
             case Controller.PRONE_CCW:
-                if s.robot_proned:
+                if s.robot_proned and s.prone_final_stage:
                     s.set_initial_bz()
                     return Controller.STAND_UP
 

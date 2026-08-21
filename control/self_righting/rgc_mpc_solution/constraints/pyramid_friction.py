@@ -17,6 +17,9 @@ def pyramid_friction(contacts, mu):
         raise ValueError("At least 3 contacts are required.")
 
     Cf_list = []
+    n_list = []
+    t1_list = []
+    t2_list = []
 
     for i in range(n_contacts):
 
@@ -28,6 +31,10 @@ def pyramid_friction(contacts, mu):
 
         Cf_i = pyramid_friction_matrix(n, t1, t2, mu)
 
+        n_list.append(n)
+        t1_list.append(t1)
+        t2_list.append(t2)
+
         Cf_list.append(Cf_i)
 
-    return block_diag(*Cf_list)
+    return block_diag(*Cf_list), n_list, t1_list, t2_list

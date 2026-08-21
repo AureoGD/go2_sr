@@ -8,12 +8,21 @@ from sim.debug.debug_visualization import DebugVisualizer
 
 import copy
 
+
 class Go2Sim:
 
     # ======================================================
     # INIT
     # ======================================================
-    def __init__(self, mj_model, mj_data, controller=None, pin_engine=None, con_dt=0.01, dyn_dt=0.001, viewer=None, log_ep=False):
+    def __init__(self,
+                 mj_model,
+                 mj_data,
+                 controller=None,
+                 pin_engine=None,
+                 con_dt=0.01,
+                 dyn_dt=0.001,
+                 viewer=None,
+                 log_ep=False):
 
         # -------------------------------
         # MuJoCo
@@ -21,13 +30,23 @@ class Go2Sim:
         self.mj_model = mj_model
         self.mj_data = mj_data
 
+        self.body_id = self.mj_model.body("base").id
+
+        def geom_ids_for_body(model, body_name):
+            body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            return np.where(model.geom_bodyid == body_id)[0]
+
+        self.geom_ids_fr_thigh = geom_ids_for_body(self.mj_model, "FR_hip")
+        self.geom_ids_rr_thigh = geom_ids_for_body(self.mj_model, "RR_hip")
+        self.geom_ids_fr_foot = geom_ids_for_body(self.mj_model, "RL_foot")
+
         # -------------------------------
         # STATE
         # -------------------------------
         self.state = SystemState()
-        self.robot_state = self.state.robot
-        self.low_level_state = self.state.low_level
-        self.debug_state = self.state.debug
+        self.rs = self.state.robot
+        self.cs = self.state.low_level
+        self.dg = self.state.debug
 
         # -------------------------------
         # PINOCCHIO
@@ -86,8 +105,11 @@ class Go2Sim:
         # --------------------------------------
         self._update_robot_state_from_mujoco()
 
-        self.pin_engine.update(self.robot_state)
+        self.pin_engine.update(self.rs)
         self._com_quantities()
+
+        # only for test the force log
+        self._feet_quatities()
 
         # --------------------------------------
         # 2. HIGH-LEVEL CONTROLLER (100 Hz)
@@ -108,13 +130,11 @@ class Go2Sim:
 
             if self.log_ep:
 
-                self.pin_engine.update(self.robot_state)
+                self.pin_engine.update(self.rs)
 
                 self._com_quantities()
 
                 self.log.append(copy.deepcopy(self.state))
-
-            # self._feet_quatities()
 
         self._feet_quatities()
         # --------------------------------------
@@ -136,35 +156,45 @@ class Go2Sim:
     # CoM quantities
     # ======================================================
     def _com_quantities(self):
-        self.robot_state.r_pos = self.pin_engine.com()
-        self.robot_state.r_vel = self.pin_engine.vcom()
+        self.rs.r_pos = self.pin_engine.com()
+        self.rs.r_vel = self.pin_engine.vcom()
 
     def _feet_quatities(self):
         foot_map = {'FR': 0, 'FL': 1, 'RR': 2, 'RL': 3}
 
-        self.robot_state.foot_touching[:] = 0
+        self.rs.foot_touching[:] = 0
+        self.rs.force_mj[:] = 0.0
+
+        f = np.zeros(6)
 
         for i in range(self.mj_data.ncon):
 
             contact = self.mj_data.contact[i]
-
             g1 = self.mj_model.geom(contact.geom1).name
             g2 = self.mj_model.geom(contact.geom2).name
 
-            if g1 in foot_map:
-                self.robot_state.foot_touching[foot_map[g1]] = 1
+            foot = g1 if g1 in foot_map else (g2 if g2 in foot_map else None)
+            if foot is None:
+                continue
 
-            if g2 in foot_map:
-                self.robot_state.foot_touching[foot_map[g2]] = 1
+            idx = foot_map[foot]
+            self.rs.foot_touching[idx] = 1
+
+            mujoco.mj_contactForce(self.mj_model, self.mj_data, i, f)
+            R = contact.frame.reshape(3, 3)
+            f_world = R.T @ f[:3]
+            if g1 in foot_map:
+                f_world = -f_world
+            self.rs.force_mj[idx] += f_world
 
     # ======================================================
     # LOW-LEVEL CONTROL (PD + gravity)
     # ======================================================
     def _low_level_control(self):
 
-        q = self.robot_state.q
-        dq = self.robot_state.dq
-        qr = self.low_level_state.qr
+        q = self.rs.q
+        dq = self.rs.dq
+        qr = self.cs.qr
 
         if not np.isfinite(q).all():
             raise RuntimeError("q inválido antes do gravity")
@@ -172,23 +202,24 @@ class Go2Sim:
         if not np.isfinite(dq).all():
             raise RuntimeError("dq inválido antes do gravity")
 
-        KP = self.low_level_state.Kp
-        KD = self.low_level_state.Kd
+        KP = self.cs.Kp
+        KD = self.cs.Kd
 
         q_error = qr - q
         dq_error = -dq
 
         tau_pd = KP * q_error + KD * dq_error
+
         tau_g = self.pin_engine.gravity()
 
         if self.controller.comp_grav:
-            tau = tau_pd+tau_g
+            tau = tau_pd + tau_g
         else:
             tau = tau_pd
-        
-        self.low_level_state.tau_pd = tau_pd
-        self.low_level_state.tau_g = tau_g
-        self.low_level_state.tau = tau
+
+        self.cs.tau_pd = tau_pd
+        self.cs.tau_g = tau_g
+        self.cs.tau = tau
 
         return np.clip(tau, -self.torque_limits, self.torque_limits)
 
@@ -215,22 +246,32 @@ class Go2Sim:
     def _update_robot_state_from_mujoco(self):
 
         # base
-        self.robot_state.b_pos = self.mj_data.qpos[0:3].copy()
+        self.rs.b_pos = self.mj_data.qpos[0:3].copy()
 
         # MuJoCo (wxyz) → Pinocchio (xyzw)
         quat_wxyz = self.mj_data.qpos[3:7]
         quat_xyzw = np.array([quat_wxyz[1], quat_wxyz[2], quat_wxyz[3], quat_wxyz[0]])
-        self.robot_state.epsilon = quat_xyzw
+        self.rs.epsilon = quat_xyzw
 
-        self.robot_state.rpy = quat_to_euler(quat=quat_xyzw, order='xyzw')
+        self.rs.rpy = quat_to_euler(quat=quat_xyzw, order='xyzw')
 
         # joints (Unitree order)
-        self.robot_state.q = self.mj_data.qpos[7:].copy()
+        self.rs.q = self.mj_data.qpos[7:].copy()
 
         # velocities
-        self.robot_state.b_vel = self.mj_data.qvel[0:3].copy()
-        self.robot_state.omega = self.mj_data.qvel[3:6].copy()
-        self.robot_state.dq = self.mj_data.qvel[6:].copy()
+        R_wb = self.mj_data.xmat[self.body_id].reshape(3, 3)
+
+        self.rs.b_vel = self.mj_data.qvel[0:3].copy()  # world frame
+        self.rs.b_vel_b = R_wb.T @ self.rs.b_vel  # body frame
+
+        self.rs.omega_b = self.mj_data.qvel[3:6].copy()  # body frame
+        self.rs.omega = R_wb @ self.rs.omega_b  # world frame
+
+        self.rs.dq = self.mj_data.qvel[6:].copy()
+
+        mujoco.mj_rnePostConstraint(self.mj_model, self.mj_data)
+        self.rs.f_com_total = np.sum(self.mj_data.cfrc_ext[:, 3:6], axis=0)
+        # self.rs.f_com_total[2] -= self.mj_model.body_mass.sum() * 9.81
 
     # ======================================================
     # RENDER
@@ -240,17 +281,11 @@ class Go2Sim:
         if self.viewer is None:
             return
 
-        base_pos = self.robot_state.b_pos
+        base_pos = self.rs.b_pos
         self.viewer.cam.lookat[:] = base_pos
 
-        # ---------------------------
-        # ADD THIS BLOCK
-        # ---------------------------
         if self.debug_viz is not None:
-
-            self.debug_viz.render(self.debug_state.sw_foot_data, self.debug_state.plane_pos, self.robot_state.rpy)
-
-        self.viewer.sync()
+            self.debug_viz.render(self.dg.sw_foot_data)
 
         self.viewer.sync()
 
@@ -284,7 +319,7 @@ class Go2Sim:
 
         self.mj_data.qvel[:] = 0.0
 
-        self.low_level_state.qr = q0.copy()
+        self.cs.qr = q0.copy()
 
         mujoco.mj_forward(self.mj_model, self.mj_data)
 
@@ -293,7 +328,7 @@ class Go2Sim:
 
         self._update_robot_state_from_mujoco()
 
-        self.pin_engine.update(self.robot_state)
+        self.pin_engine.update(self.rs)
 
         for _ in range(100):
 
@@ -303,13 +338,13 @@ class Go2Sim:
 
             self._update_robot_state_from_mujoco()
 
-            self.pin_engine.update(self.robot_state)
+            self.pin_engine.update(self.rs)
 
         self._is_render = render_aux
 
         self._update_robot_state_from_mujoco()
 
-        self.pin_engine.update(self.robot_state)
+        self.pin_engine.update(self.rs)
 
         if self.controller is not None:
             if hasattr(self.controller, "reset"):

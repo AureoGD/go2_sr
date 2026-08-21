@@ -12,7 +12,7 @@ class DebugVisualizer:
 
     def __init__(self, viewer):
         self.viewer = viewer
-        self.colors = [RED, GREY, GREY, GREY, GREY, GREEN, BLUE, RED]
+        self.colors = [RED, BLUE, GREY, GREEN, GREY, GREEN, BLUE, RED]
 
     def _add_sphere(self, scn, pos, radius, rgba):
         if scn.ngeom >= scn.maxgeom:
@@ -40,7 +40,9 @@ class DebugVisualizer:
 
         scn.ngeom += 1
 
-    def render(self, spheres, plane_pos, rpy):
+
+
+    def render(self, spheres, plane_pos=None, rpy=None):
         if self.viewer is None:
             return
 

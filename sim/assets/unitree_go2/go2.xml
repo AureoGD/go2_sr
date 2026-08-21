@@ -70,7 +70,7 @@
       <geom mesh="base_2" material="black" class="visual"/>
       <geom mesh="base_3" material="white" class="visual"/>
       <geom mesh="base_4" material="gray" class="visual"/>
-      <geom size="0.1881 0.04675 0.057" type="box" class="collision"/>
+      <geom size="0.125 0.04675 0.057" type="box" class="collision"/>
       <geom size="0.05 0.045" pos="0.285 0 0.01" type="cylinder" class="collision"/>
       <geom size="0.047" pos="0.293 0 -0.06" class="collision"/>
       <geom name="front_head_contact" class="collision"  type="cylinder" pos="0.22 0 0.085" size="0.02 0.0025" rgba="1 0 0 0.5"/>

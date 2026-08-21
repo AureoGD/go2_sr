@@ -12,7 +12,7 @@ class PlaneConstraint:
         if self.n_local @ p_rel < 0:
             self.n_local *= -1
 
-    def update(self, R_b, p_base, p):
+    def update(self, R_b, p_base):
         n_w = R_b @ self.n_local
         p_off_w = p_base.flatten() + R_b @ self.p_offset_local.flatten()
 

@@ -22,6 +22,11 @@ class Go2State:
     foot_forces: np.ndarray = field(default_factory=lambda: np.zeros(12))
     foot_touching: np.ndarray = field(default_factory=lambda: np.zeros(4))
 
+    force_mj: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
+    f_com_total: np.ndarray = field(default_factory=lambda: np.zeros(3))
+
+    force_shoulder: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
+
 
 @dataclass
 class LowLevelState:

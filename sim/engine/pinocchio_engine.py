@@ -111,7 +111,7 @@ class PinocchioEngine:
             q_legs
         ])
 
-        dq = np.concatenate([rs.b_vel, rs.omega, dq_legs])
+        dq = np.concatenate([rs.b_vel_b, rs.omega_b, dq_legs])
 
         return q, dq
 

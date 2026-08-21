@@ -7,6 +7,8 @@ from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import 
 from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
 
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
+from control.self_righting.rgc_mpc_solution.utils.geometry import plane_normal
+from control.self_righting.rgc_mpc_solution.utils.build_gamma_star import GammaBuilder, CONFIGS
 
 
 class StandUp(BaseRGCController):
@@ -26,7 +28,6 @@ class StandUp(BaseRGCController):
         self.nx = 26  # CoM lin vel (3, 1), CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
         self.ny = 13  # CoM z position (1, 1), body orientation (4, 1), CoM linear vel. (3, 1), and CoM ang. vel. (3, 1)
-        self.nc = 38  # ground reaction forces (20, 1), qr (12, 1), CoM projection (6, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -35,10 +36,7 @@ class StandUp(BaseRGCController):
         # Aumented matrices
         self.Aa = np.zeros((self.nx + self.nu, self.nx + self.nu), dtype=np.float32)
         self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
-        self.Ca = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
-
-        # Aumented matrices
-        self.Cc = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
+        self.Cy = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
 
         # Initialize constans
         self.A[18:21, 0:3] = np.identity(3)
@@ -48,21 +46,31 @@ class StandUp(BaseRGCController):
         self.Ba[26:, :] = np.identity(self.nu)
 
         # OUTPUT MATRIX:
-        self.Ca[0:3, 18:21] = np.identity(3)   # z com pos
-        self.Ca[3:7, 21:25] = np.identity(4)  # epsilon
-        self.Ca[7:10, 0:3] = np.identity(3)  # com lin vel
-        self.Ca[10:, 3:6] = np.identity(3)  # com ang vel
+        self.Cy[0:3, 18:21] = np.identity(3)  # z com pos
+        self.Cy[3:7, 21:25] = np.identity(4)  # epsilon
+        self.Cy[7:10, 0:3] = np.identity(3)  # com lin vel
+        self.Cy[10:, 3:6] = np.identity(3)  # com ang vel
 
-        # Joint position constrain
-        self.Cc[26:, 26:] = np.identity(12)
+        # Constraints
+        # ground reaction qr (12, 1), CoM projection (6, 1), forces (20, 1)
+        self.i_qr = slice(0, 12)
+        self.i_com = slice(self.i_qr.stop, self.i_qr.stop + 6)
+        self.i_grf = slice(self.i_com.stop, self.i_com.stop + 20)
+        self.nch = self.i_grf.stop
+
+        self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
+
+        self.Cch[self.i_qr, self.nx:] = np.identity(12)
 
         # ----------------------------------------
         # Weights
         # ----------------------------------------
 
+        self.gamma_builder = GammaBuilder(self.pin_engine, CONFIGS["stand_up"], self.Kp_vec, self.Kd_vec, 2)
+
         # Output weight matrix
-        Q_rz = np.diag(np.array([0.25, 0.5, 10]))
-        Q_eps = 5 * np.eye(4)
+        Q_rz = 1 * np.diag(np.array([1, 1, 10]))
+        Q_eps = 10 * np.diag(np.array([1, 1, 1, 1]))
         Q_dr = 1 * np.eye(3)
         Q_omega = 1 * np.eye(3)
         Q = block_diag(Q_rz, Q_eps, Q_dr, Q_omega)
@@ -79,7 +87,7 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
         # Constraints
         # ----------------------------------------
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 30])
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 35])
         foot_u = np.array([0, 0, np.inf, np.inf, 150])
 
         # Stack for all 4 feet
@@ -91,7 +99,7 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
         # Controller specific variables and objects
         # ----------------------------------------
-        self.z_ref = np.array([[0.20]]).reshape(1, 1)
+        self.z_ref = np.array([[0.18]]).reshape(1, 1)
 
         self.L = np.zeros((12, 38), dtype=np.float32)
         self.L[:, 6:18] = -self.kp * np.identity(12)
@@ -123,30 +131,12 @@ class StandUp(BaseRGCController):
         I = self.pin_engine.centroidal_inertia()
         Iinv = np.linalg.inv(I)
 
-        J_com = self.pin_engine.com_jacobian()
+        gamma_l_star, gamma_a_star, _, Sa, Jc = self.gamma_builder.build(r, use_gamma_e=False)
 
-        J_com_stacked = np.vstack([J_com, J_com, J_com, J_com])
-
-        Jc = np.zeros((12, 12), dtype=np.float32)
-        Sa = np.zeros((12, 3), dtype=np.float32)
-
-        for i, leg in enumerate(self.leg_names):
-
-            Jc_full = self.pin_engine.frame_jacobian(leg, "foot")[0:3, i * 3:(i + 1) * 3]
-
-            Jc[i * 3:(i + 1) * 3, i * 3:(i + 1) * 3] = Jc_full
-
-            contact_pos = self.pin_engine.frame_pos(leg, "foot")
-            Sa[i * 3:(i + 1) * 3, :] = self.skew_symmetric_matrix(contact_pos - r.flatten())
-
-            self.contacts[i, :] = contact_pos
-
-        Gamma = J_com_stacked - Jc
-
-        gamma_inv = np.linalg.inv(Gamma)
-
-        gamma_l_star = gamma_inv @ self.Is.T
-        gamma_a_star = gamma_inv @ Sa
+        self.contacts[0, :] = self.pin_engine.frame_pos("FR", "foot")
+        self.contacts[1, :] = self.pin_engine.frame_pos("FL", "foot")
+        self.contacts[2, :] = self.pin_engine.frame_pos("RR", "foot")
+        self.contacts[3, :] = self.pin_engine.frame_pos("RL", "foot")
 
         self.Jinv = (np.linalg.inv(Jc.T))
 
@@ -185,46 +175,44 @@ class StandUp(BaseRGCController):
         self.L[:, 0:3] = -self.kd * gamma_l_star
         self.L[:, 3:6] = self.kd * gamma_a_star
 
-    def build_output_constraint_matrices(self):
+    def build_hard_constraint_matrices(self):
 
-        Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
-        aux_cons = np.zeros((self.nc, self.nu))
+        Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.nch, self.nu))
 
-        pyramid_fric_matrix = pyramid_friction(self.contacts, 0.7 / np.sqrt(2))
-        self.Cc[:20, :] = -pyramid_fric_matrix @ self.Jinv @ self.L
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts, 0.7 / np.sqrt(2))
 
+        self.Cch[self.i_grf, :] = -pyramid_fric_matrix @ self.Jinv @ self.L
+
+        #
+
+        _xy, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
+        self.Cch[self.i_com, 18:20] = A_hex
+        l = np.vstack((self.q_min.reshape(-1, 1), self.com_const.reshape(-1, 1), self.f_l.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), self.f_u.reshape(-1, 1)))
+        self.lch = np.tile(l, (self.N, 1))
+        self.uch = np.tile(u, (self.N, 1))
         if self.first_cont_interation:
-
-            _xy, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
-            self.ref.reshape(self.N, self.ny)[:,0:2]=_xy.reshape(2,) 
-            self.Cc[20:26, 18:20] = A_hex
-
-            l = np.vstack((self.f_l.reshape(-1, 1), self.com_const.reshape(-1, 1), self.q_min.reshape(-1, 1)))
-            u = np.vstack((self.f_u.reshape(-1, 1), b_hex.reshape(-1, 1), self.q_max.reshape(-1, 1)))
-
-            self.l = np.tile(l, (self.N, 1))
-            self.u = np.tile(u, (self.N, 1))
-
+            self.ref.reshape(self.N, self.ny)[:, 0:2] = _xy.reshape(2,)
             self.first_cont_interation = False
 
-        Phi_cons[0:self.nc, :] = self.Cc @ self.Aa
-        aux_cons = self.Cc @ self.Ba
+        Phi_cons[0:self.nch, :] = self.Cch @ self.Aa
+        aux_cons = self.Cch @ self.Ba
 
         return aux_cons, Phi_cons
 
     def build_reference(self):
 
         if self.first_cont_interation:
-
             # update z ref
             z = self.rs.r_pos[2]
             rzRef = z + self.z_ref
-
-            # keep the currently yaw
-            yaw = self.rs.rpy[2]
-            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
-            epsRef = epsRef.reshape(4, 1)
-
-            ref = np.vstack((np.zeros((2, 1)), rzRef, epsRef, np.zeros((3, 1)), np.zeros((3, 1))))
-
+            ref = np.vstack((np.zeros((2, 1)), rzRef, np.zeros((4, 1)), np.zeros((3, 1)), np.zeros((3, 1))))
             self.ref = np.tile(ref, (self.N, 1))
+
+        # keep the currently yaw
+        yaw = self.rs.rpy[2]
+        n, _ = plane_normal(self.contacts)
+        epsRef, _ = eps_reference(plane_normal=n, current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
+        epsRef = epsRef.reshape(4,)
+        self.ref.reshape(self.N, self.ny)[:, 3:7] = epsRef

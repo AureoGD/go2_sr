@@ -2,10 +2,11 @@ import json
 import numpy as np
 from datetime import datetime
 from pathlib import Path
+from evaluation.self_colision_checker import SelfCollisionChecker
 
 # --- configuration ---
 SEED = 42
-N_PER_BIN = 5
+N_PER_BIN = 20
 N_BINS = 24
 JOINT_NOISE_STD = np.array([0.1, 0.5, 0.5, 0.1, 0.5, 0.5, 0.1, 0.5, 0.5, 0.1, 0.5, 0.5])
 Q0_NOMINAL = np.array([-0.3, 1.0, -1.72, -0.5, 1.0, -1.72, 0.5, 1.40, -1.7, -0.5, 0.8, -1.5])
@@ -16,10 +17,14 @@ Q_MIN = np.array(
 Q_MAX = np.array(
     [1.0472, 3.4907, -0.83776, 1.0472, 3.4907, -0.83776, 1.0472, 4.5379, -0.83776, 1.0472, 4.5379, -0.83776])
 
+PATH = "sim/assets/unitree_go2/scene.xml"
+
+scc = SelfCollisionChecker(PATH)
+
 
 def is_valid(q):
     """Joint limits + any collision/feasibility check you want."""
-    return np.all(q >= Q_MIN) and np.all(q <= Q_MAX)
+    return np.all(q >= Q_MIN) and np.all(q <= Q_MAX) and not scc.is_self_colliding(q)
 
 
 def main():
@@ -29,13 +34,13 @@ def main():
     ics = []
     ic_id = 0
     for b in range(N_BINS):
-        for _ in range(N_PER_BIN):
+        for a in range(N_PER_BIN):
             yaw = rng.uniform(edges[b], edges[b + 1])
             while True:  # reject-and-resample
                 q = Q0_NOMINAL + rng.normal(0, JOINT_NOISE_STD, Q0_NOMINAL.shape)
                 if is_valid(q):
                     break
-            ics.append({"ic_id": ic_id, "yaw_bin": b, "yaw": float(yaw), "q0": q.tolist()})
+            ics.append({"ic_id": ic_id, "yaw_bin": b, "yaw_bin_number": a, "yaw": float(yaw), "q0": q.tolist()})
             ic_id += 1
 
     data = {

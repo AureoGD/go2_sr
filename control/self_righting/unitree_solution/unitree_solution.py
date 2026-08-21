@@ -51,15 +51,12 @@ class UnitreeSelfRighting(BaseSelfRighting):
 
     def before_step(self, state, action):
         cs = state.low_level
-        rs = state.robot
-
-        if self.phase_iterations == 0 and self.phase_now ==0:
-            cs.qr = rs.q
 
         self.dqr, Kp, Kd = self.compute_action(state, action)
-
+     
         cs.qr += self.dqr
         cs.dqr = self.dqr
+
         cs.Kp = Kp
         cs.Kd = Kd
 
@@ -68,11 +65,12 @@ class UnitreeSelfRighting(BaseSelfRighting):
         # because it follows a strict time schedule.
         dqr = np.zeros((12,1))
         if action == 1:
+            if self.phase_now in [0, 1] and self.phase_now == 0:
+                state.low_level.qr = state.robot.q.copy()
             if self.iterations < sum(self.phase_duration):
                 # Init Phase
                 if self.phase_iterations == 0:
-                    # Initialize qr_ant if it's the very first step
-                    if self.iterations == 0 and state is not None:
+                    if self.phase_iterations == 0 and state is not None:
                         self.qr_ant = state.low_level.qr.reshape(12, 1)
 
                     target = self.sr_q_refs[self.phase_now].reshape(12, 1)

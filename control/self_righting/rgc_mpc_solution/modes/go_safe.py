@@ -18,32 +18,58 @@ class GoSafe(BaseRGCController):
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
-        self.nx = 12  # delta q (12, 1)
+        self.nx = 12  # q (12, 1)
         self.nu = 12  # delta qr (12, 1)
         self.ny = 12  # qr (12, 1)
-        self.nc = 30  # qr (12,1), legs links dist (6, 1)
 
-        # Dynamic matrices
+        # Constraints slices
+        self.i_qr = slice(0, 12)
+        self.i_tau = slice(self.i_qr.stop, self.i_qr.stop + 12)
+        self.nch = self.i_tau.stop
+
+        # ----------------------------------------
+        # Low-level mode controller gains
+        # ----------------------------------------
+
+        self.Kp_vec = np.ones(12) * self.kp / 2
+        self.Kd_vec = np.ones(12) * self.kd / 10
+
+        # ----------------------------------------
+        # Matrices creation
+        # ----------------------------------------
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
         self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
 
         # Aumented matrices
         self.Aa = np.zeros((self.nx + self.nu, self.nx + self.nu), dtype=np.float32)
         self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
-        self.Ca = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
+        self.Cy = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
 
-        # Constraint matrix
-        self.Cc = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
+        # Hard constraint matrix
+        self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
 
-        # Initialize constans
+        # ----------------------------------------
+        # Matrices inicialization
+        # ----------------------------------------
+
+        self.damping = 2
+        self.Lambda = np.diag(self.Kp_vec / (self.Kd_vec + self.damping))
+
+        self.Aa[0:12, 0:12] = np.eye(12) + self.ts * -self.Lambda
+        self.Aa[0:12, self.nx:] = self.ts * self.Lambda
+        # self.Aa[12:24, 0:12] = np.eye(12)
         self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Output matrix
-        self.Ca[:, 0:12] = np.identity(12)  # joint pos
+        self.Cy[:, 0:12] = np.identity(12)
+        # self.q_ant = np.zeros(12)
 
         # Constraint matrix
-        self.Cc[0:12, 12:] = np.identity(12)
+        self.Cch[self.i_qr, 12:] = np.identity(12)
+        Ke = np.diag(self.Kp_vec)-np.diag(self.Kd_vec)@self.Lambda
+        self.Cch[self.i_tau, :12] = -Ke
+        self.Cch[self.i_tau, 12:] = Ke
 
         # ----------------------------------------
         # Weights
@@ -52,27 +78,27 @@ class GoSafe(BaseRGCController):
         Qq = 1 * np.eye(12)
         self.Q = block_diag(*[Qq] * self.N)
 
-        dqrWfr = np.diag(150 * np.array([1, 1, 1]))
-        dqrWfl = np.diag(300 * np.array([1, 1, 1]))
-        dqrWrr = np.diag(450 * np.array([1, 1, 1]))
-        dqrWrl = np.diag(600 * np.array([1, 1, 1]))
-        R = block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
+        dqrWfr = np.diag(1 * np.array([1, 1, 1]))
+        dqrWfl = np.diag(1 * np.array([1, 1, 1]))
+        dqrWrr = np.diag(1 * np.array([1, 1, 1]))
+        dqrWrl = np.diag(1 * np.array([1, 1, 1]))
+
+        R = 100 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
         self.R = block_diag(*[R] * self.M)
 
         # ----------------------------------------
         # Reference
         # ----------------------------------------
-
         qr = np.array([[0.7, 1.4, -2.6, -0.7, 1.4, -2.6, 0.7, 1.4, -2.6, -0.7, 1.4, -2.6]]).transpose()
         self.ref = np.tile(qr, (self.N, 1))
 
         # ----------------------------------------
         # Controller specific variables and objects
         # ----------------------------------------
-
-        self.radius = 0.010
-        self.d_safe = 0.005
-
+        self.ncs = 6
+        self.wcs_collision = 1
+        self.radius = 0.025
+        self.d_safe = 0.05
         self.collision_pairs = [
             ("FR", "FL"),
             ("FR", "RR"),
@@ -82,84 +108,49 @@ class GoSafe(BaseRGCController):
             ("RR", "RL"),
         ]
 
-        M = np.diag([0.02, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005])
-
-        M_diag = np.diag(M)
-        Kp_diag = self.kp
-
-        self.Iu = np.eye(12)
-
-        self.lambda_vec = np.sqrt(Kp_diag / M_diag)
-
-        self.alpha = self.Iu - self.ts * np.diag(self.lambda_vec)
-
         self.first_int = True
 
         self.inf_vec = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf])
 
-        # ----------------------------------------
-        # Low-level mode controller gains
-        # ----------------------------------------
-
-        self.Kp_vec = np.ones(12) * self.kp / 2
-        self.Kd_vec = np.ones(12) * self.kd / 10
-
-        self.kp_mtx = np.diag(self.Kp_vec)
-        self.kd_mtx = np.diag(self.Kd_vec)
-
     def update_model(self):
-        M = self.pin_engine.actuated_mass_matrix()
-
-        M_diag = np.maximum(np.diag(M), 1e-6)
-
-        self.lambda_vec = np.sqrt(self.kp / M_diag)
-
-        self.alpha = self.Iu - self.ts * np.diag(self.lambda_vec)
-
-        self.Aa[0:12, 0:12] = self.alpha
-        self.Aa[0:12, 12:] = self.Iu - self.alpha
-
         self.x = np.vstack((self.rs.q.reshape(-1, 1), self.cs.qr.reshape(-1, 1)))
 
-    def build_output_constraint_matrices(self):
+    def build_hard_constraint_matrices(self):
 
-        J, dist = self_collision_constraints(pin_engine=self.pin_engine,
-                                             pairs=self.collision_pairs,
-                                             radius=self.radius,
-                                             d_safe=self.d_safe)
+        Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.nch, self.nu))
 
-        Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
-        aux_cons = np.zeros((self.nc, self.nu))
+        Phi_cons[:self.nch, :] = self.Cch @ self.Aa
+        aux_cons = self.Cch @ self.Ba
 
-        self.Cc[12:18, 0:12] = self.ts * J @ (-self.lambda_vec * self.Iu).reshape(12, 12)
-        self.Cc[12:18, 12:] = self.ts * J @ (self.lambda_vec * self.Iu).reshape(12, 12)
+        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
 
-        tau_c = self.kp_mtx - np.diag(self.lambda_vec) @ self.kd_mtx
-        self.Cc[18:, 0:12] = -tau_c
-        self.Cc[18:, 12:] = tau_c
-
-        Phi_cons[:self.nc, :] = self.Cc @ self.Aa
-        aux_cons = self.Cc @ self.Ba
-
-        l = np.vstack((self.q_min.reshape(-1, 1), dist.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
-        u = np.vstack((self.q_max.reshape(-1, 1), self.inf_vec.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
-
-        self.l = np.tile(l, (self.N, 1))
-        self.u = np.tile(u, (self.N, 1))
+        self.lch = np.tile(l, (self.N, 1))
+        self.uch = np.tile(u, (self.N, 1))
 
         return aux_cons, Phi_cons
 
-    def update_pred_mdl(self):
+    def build_soft_constraint_matrices(self):
 
-        Phi, G, Phi_cons, G_cons = super().update_pred_mdl()
+        Phi_cons = np.zeros((self.ncs * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.ncs, self.nu))
 
-        for s in range(0, (self.N - 1) * 18, 18):
+        Jrow, dist = self_collision_constraints(self.pin_engine, self.collision_pairs, self.radius, self.d_safe)
 
-            G_cons[30 + s:36 + s] += G_cons[12 + s:18 + s]
+        Ccs = np.zeros((self.ncs, self.nx + self.nu))
+        Ccs[:, 0:12] = Jrow
 
-            Phi_cons[30 + s:36 + s] += Phi_cons[12 + s:18 + s]
+        q0 = self.x[0:12]
+        nJq0 = (Jrow @ q0).reshape(-1, 1)
+        self.lcs = np.tile(dist + nJq0, (self.N, 1))
+        self.ucs = np.tile(np.full((self.ncs, 1), np.inf), (self.N, 1))
 
-        return Phi, G, Phi_cons, G_cons
+        self.wcs = self.wcs_collision * np.ones(self.ncs * self.N)
+
+        Phi_cons[:self.ncs, :] = Ccs @ self.Aa
+        aux_cons = Ccs @ self.Ba
+        return aux_cons, Phi_cons
 
     def build_reference(self):
         pass

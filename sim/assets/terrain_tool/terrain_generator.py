@@ -244,35 +244,33 @@ class TerrainGenerator:
 if __name__ == "__main__":
     tg = TerrainGenerator()
 
-    # Slope
     lenght = 3
     wide = 3
 
-    tg.AddPerlinHeighField(position=[0, wide, 0], size=[wide, wide], idx=1)
-
-    # Flat terrain and 0º Perlin heigh field
     tg.AddBox(position=[0, 0, -0.025], euler=[0.0, 0, 0.0], size=[lenght, wide, 0.1])
+
+    # tg.AddBox(position=[0, 0.2, 0.01], euler=[0.0, 0, 0.0], size=[0.5, 0.1, 0.05])
 
     # 5º slope terrain and 5º Perlin heigh field
     ang = np.pi * 5 / 180
     z = -0.05 + lenght * np.sin(ang) / 2
-    tg.AddBox(position=[wide + 0.25, 0, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
+    tg.AddBox(position=[0, wide, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
 
-    # ang = np.pi * 5 / 180
-    # z = -0.05 + lenght * np.sin(ang) / 2
-    # tg.AddBox(position=[0, wide, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
+    ang = np.pi * 10 / 180
+    z = -0.05 + lenght * np.sin(ang) / 2
+    tg.AddBox(position=[0, wide * 2, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
 
-    # ang = np.pi * 10 / 180
-    # z = -0.05 + lenght * np.sin(ang) / 2
-    # tg.AddBox(position=[wide + 0.25, 0, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
+    ang = np.pi * 15 / 180
+    z = -0.05 + lenght * np.sin(ang) / 2
+    tg.AddBox(position=[0, wide * 3, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
 
-    # ang = np.pi * 15 / 180
-    # z = -0.05 + lenght * np.sin(ang) / 2
-    # tg.AddBox(position=[wide + 0.25, wide, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
+    ang = np.pi * 20 / 180
+    z = -0.05 + lenght * np.sin(ang) / 2
+    tg.AddBox(position=[0, wide * 4, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
 
-    # ang = np.pi * 20 / 180
-    # z = -0.05 + lenght * np.sin(ang) / 2
-    # tg.AddBox(position=[wide * 2 + 0.25, 0, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
+    ang = np.pi * 25 / 180
+    z = -0.05 + lenght * np.sin(ang) / 2
+    tg.AddBox(position=[0, wide * 5, z], euler=[0.0, -ang, 0.0], size=[lenght, wide, 0.1])
 
     # # # Rough ground
     # # tg.AddRoughGround(init_pos=[2, 2, 0.0], euler=[0, 0, 0.0], nums=[12, 12])

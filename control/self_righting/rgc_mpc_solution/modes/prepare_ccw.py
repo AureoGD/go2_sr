@@ -4,12 +4,11 @@ from scipy.linalg import block_diag
 
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.constraints.plane_colision import PlaneConstraint
+from control.self_righting.rgc_mpc_solution.constraints.self_collision import self_collision_constraints
+
 
 
 class PrepareCCW(BaseRGCController):
-
-    TASK_NAME = "prepare_cw"
-    TASK_LEVEL = 2
 
     def __init__(self, robot_states, **kwargs):
         super().__init__(robot_states, **kwargs)
@@ -22,76 +21,14 @@ class PrepareCCW(BaseRGCController):
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
-        self.nx = 18  # joint pos (12, 1), rl knee pos (3, 1), rl foot pos (3, 1)
+        self.nx = 12  # q (12, 1), q_ant (12, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 12  # joint pos (12, 1)
-        self.nc = 25  # qr (12, 1), knee contact (1,1), (12,1)
+        self.ny = 12  # qr (12, 1)
 
-        # Dynamic matrices
-        self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
-        self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
-
-        # Aumented matrices
-        self.Aa = np.zeros((self.nx + self.nu, self.nx + self.nu), dtype=np.float32)
-        self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
-        self.Ca = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
-
-        # Constraint matrix
-        self.Cc = np.zeros((self.nc, self.nx + self.nu), dtype=np.float32)
-
-        # Initialize constans
-        self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
-        self.Aa[12:15, 12:15] = np.identity(3)
-        self.Aa[15:18, 12:15] = np.identity(3)
-
-        self.Ba[self.nx:, :] = np.identity(self.nu)
-
-        # Joint position
-        self.Ca[0:12, 0:12] = np.identity(12)
-
-        # Joint reference
-        self.Cc[0:12, 18:] = np.identity(12)
-
-        M = np.diag([0.02, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005, 0.011, 0.011, 0.005])
-
-        M_diag = np.diag(M)
-        Kp_diag = self.kp
-
-        self.lambda_vec = np.sqrt(Kp_diag / M_diag)
-
-        self.alpha = np.eye(12) - self.ts * np.diag(self.lambda_vec)
-
-        Qq = np.array([0.01, 0.01, 0.01])
-        Qq = np.diag(Qq)
-
-        Qf = np.array([1, 0.05, 0.05])
-        Qf = np.diag(Qf)
-
-        Q = block_diag(Qq, Qq, Qf, Qq)
-        self.Q = block_diag(*[Q] * self.N)
-
-        Rdqr = np.array([10, 10, 10])
-        Rdqr = np.diag(Rdqr)
-        Rdqrf = np.array([0.1, 20, 5])
-        Rdqrf = np.diag(Rdqrf)
-        R = block_diag(Rdqr, Rdqr, Rdqrf, Rdqr)
-        self.R = block_diag(*[R] * self.M)
-
-        qr = np.array([[0.8, 1.0, -2.6, 0.6, 1.5, -2.0, 1.025, 4.15, -2.2, 0.6, 1.5, -2.0]]).transpose()
-
-        ref = np.vstack((qr))
-        self.ref = np.tile(ref, (self.N, 1))
-
-        self.p_offset_local = np.array([0.0, 0.0, 0.06755])
-        self.d_safe = 0.05
-        R_b_plane = self.roty(-5)
-        self.n_local = R_b_plane @ np.array([0.0, 0.0, 1.0])
-
-        self.colision_cons = PlaneConstraint(self.n_local, self.p_offset_local, self.d_safe, np.zeros((3, 1)))
-
-        self.first_int = True
-
-        self.Iu = np.eye(12)
+        # Constraints slices
+        self.i_qr = slice(0, 12)
+        self.i_tau = slice(self.i_qr.stop, self.i_qr.stop + 12)
+        self.nch = self.i_tau.stop
 
         # ----------------------------------------
         # Low-level mode controller gains
@@ -100,67 +37,181 @@ class PrepareCCW(BaseRGCController):
         self.Kp_vec = np.ones(12) * self.kp / 2
         self.Kd_vec = np.ones(12) * self.kd / 10
 
-        self.kp_mtx = np.diag(self.Kp_vec)
-        self.kd_mtx = np.diag(self.Kd_vec)
+        # ----------------------------------------
+        # Matrices creation
+        # ----------------------------------------
+        self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
+        self.B = np.zeros((self.nx, self.nu), dtype=np.float32)
+
+        # Aumented matrices
+        self.Aa = np.zeros((self.nx + self.nu, self.nx + self.nu), dtype=np.float32)
+        self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
+        self.Cy = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
+
+        # Hard constraint matrix
+        self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
+
+        # ----------------------------------------
+        # Matrices inicialization
+        # ----------------------------------------
+
+        self.damping = 2
+        self.Lambda = np.diag(self.Kp_vec / (self.Kd_vec + self.damping))
+
+        self.Aa[0:12, 0:12] = np.eye(12) + self.ts * -self.Lambda
+        self.Aa[0:12, self.nx:] = self.ts * self.Lambda
+        # self.Aa[12:24, 0:12] = np.eye(12)
+        self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
+        self.Ba[self.nx:, :] = np.identity(self.nu)
+
+        # Output matrix
+        self.Cy[:, 0:12] = np.identity(12)
+
+        self.Cch[self.i_qr, 12:] = np.identity(12)
+
+        Ke = np.diag(self.Kp_vec)-np.diag(self.Kd_vec)@self.Lambda
+        self.Cch[self.i_tau, :12] = -Ke
+        self.Cch[self.i_tau, 12:] = Ke
+
+        # ----------------------------------------
+        # Weights
+        # ----------------------------------------
+
+        Qq = 1 * np.eye(12)
+        self.Q = block_diag(*[Qq] * self.N)
+
+        dqrWfr = np.diag(1 * np.array([1, 1, 1]))
+        dqrWfl = np.diag(1 * np.array([1, 1, 1]))
+        dqrWrr = np.diag(1 * np.array([1, 1, 1]))
+        dqrWrl = np.diag(1 * np.array([1, 1, 1]))
+
+        R = 200 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
+        self.R = block_diag(*[R] * self.M)
+
+        # ----------------------------------------
+        # Reference
+        # ----------------------------------------
+        qr = np.array([[0.00, 1.00, -2.60,
+                        1.05, 1.50, -2.30, 
+                        1.02, 4.15, -2.20,
+                        1.05, 1.50, -2.30]]).transpose()  
+
+        self.ref = np.tile(qr, (self.N, 1))
+
+        # ----------------------------------------
+        # Controller specific variables and objects
+        # ----------------------------------------
+        self.ncs = 9
+        self.wcs_collision = 1
+        self.radius = 0.025
+        self.d_safe = 0.05
+        self.collision_pairs = [
+            ("FR", "FL"),
+            ("FR", "RR"),
+            ("FR", "RL"),
+            ("FL", "RR"),
+            ("FL", "RL"),
+            ("RR", "RL"),
+        ]
+
+        self.p_offset_local = np.array([0.0, 0.0, 0.06755])
+        R_b_plane = self.roty(-5)
+        self.n_local = R_b_plane @ np.array([0.0, 0.0, 1.0])
+
+        self.colision_cons = PlaneConstraint(self.n_local, self.p_offset_local, self.d_safe, np.zeros((3, 1)))
+        self.wcs_plane = 2.5
+
+        self.wcs_grf = 2
+
+        wcs = np.vstack((self.wcs_collision * np.ones((6, 1)), np.array([[self.wcs_plane]]), self.wcs_grf * np.ones(
+            (2, 1))))
+        self.wcs = np.tile(wcs, (self.N, 1))
+
+        self.first_int = True
+
+        self.fr_count = 0
 
     def update_model(self):
-        M = self.pin_engine.actuated_mass_matrix()
+        self.x = np.vstack((self.rs.q.reshape(-1, 1), self.cs.qr.reshape(-1, 1)))
 
-        M_diag = np.maximum(np.diag(M), 1e-6)
+    def build_hard_constraint_matrices(self):
 
-        self.lambda_vec = np.sqrt(self.kp / M_diag)
+        Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.nch, self.nu))
 
-        self.alpha = self.Iu - self.ts * np.diag(self.lambda_vec)
+        Phi_cons[:self.nch, :] = self.Cch @ self.Aa
+        aux_cons = self.Cch @ self.Ba
 
-        Jk = self.pin_engine.linear_leg_jacobian('RR', 'calf')
-        Jf = self.pin_engine.linear_leg_jacobian('RR', 'foot')
+        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
 
-        self.Aa[0:12, 0:12] = self.alpha
-        self.Aa[0:12, 18:] = self.Iu - self.alpha
-
-        self.Aa[12:15, 6:9] = -self.ts * Jk
-        self.Aa[12:15, 24:27] = self.ts * Jk
-
-        self.Aa[15:18, 6:9] = -self.ts * Jf
-        self.Aa[15:18, 24:27] = self.ts * Jf
-
-        rl_foot = self.pin_engine.frame_pos('RR', 'foot')
-        rl_knee = self.pin_engine.frame_pos('RR', 'calf')
-
-        self.x = np.vstack(
-            (self.rs.q.reshape(-1, 1), rl_knee.reshape(-1, 1), rl_foot.reshape(-1, 1), self.cs.qr.reshape(-1, 1)))
-
-    def build_output_constraint_matrices(self):
-        Phi_cons = np.zeros((self.nc * self.N, self.nx + self.nu))
-        aux_cons = np.zeros((self.nc, self.nu))
-
-        if self.first_int:
-            Rb = self.pin_engine.get_base_rot_mtx()
-            n_w, lb, ub, p_offset_w = self.colision_cons.update(p_base=self.rs.b_pos, R_b=Rb, p=self.x[12:15])
-            self.dg.plane_pos = p_offset_w
-            self.Cc[12, 12:15] = n_w
-            tau_c = self.kp_mtx - np.diag(self.lambda_vec) @ self.kd_mtx
-            self.Cc[13:, 0:12] = -tau_c
-            self.Cc[13:, 18:] = tau_c
-
-            margin = float(n_w @ self.x[12:15]) - lb
-            slack = max(0.0, -margin + 1e-4)
-
-            l = np.vstack((self.q_min.reshape(-1, 1), lb - slack, self.tau_min.reshape(-1, 1)))
-            u = np.vstack((self.q_max.reshape(-1, 1), ub, self.tau_max.reshape(-1, 1)))
-
-            self.l = np.tile(l, (self.N, 1))
-            self.u = np.tile(u, (self.N, 1))
-
-        Phi_cons[:self.nc, :] = self.Cc @ self.Aa
-        aux_cons = self.Cc @ self.Ba
+        self.lch = np.tile(l, (self.N, 1))
+        self.uch = np.tile(u, (self.N, 1))
 
         return aux_cons, Phi_cons
+
+    def build_soft_constraint_matrices(self):
+
+        Phi_cons = np.zeros((self.ncs * self.N, self.nx + self.nu))
+        aux_cons = np.zeros((self.ncs, self.nu))
+
+        Jrow, dist = self_collision_constraints(self.pin_engine, self.collision_pairs, self.radius, self.d_safe)
+
+        Ccs = np.zeros((self.ncs, self.nx + self.nu))
+        Ccs[0:6, 0:12] = Jrow
+
+        nJq0 = (Jrow @ self.x[0:12]).reshape(-1, 1)
+
+        Rb = self.pin_engine.get_base_rot_mtx()
+        n_w, lb, ub, p_offset_w = self.colision_cons.update(p_base=self.rs.b_pos, R_b=Rb)
+        p_k0 = self.pin_engine.frame_pos('RR', 'calf')
+        Jk = self.pin_engine.linear_leg_jacobian('RR', 'calf')
+        g = n_w @ Jk
+        Ccs[6, 9:12] = g
+        knee_lower = lb - n_w @ p_k0 + g @ self.x[6:9]
+
+        f_cte_l = np.array([-np.inf, -np.inf])
+        f_cte_u = np.array([np.inf, np.inf])
+
+        J = self.pin_engine.linear_leg_jacobian("FL", "thigh")
+        J_inv = np.linalg.pinv(J).T
+        self.rs.force_shoulder[1] = -J_inv @ self.cs.tau[3:6]
+        if np.linalg.norm(self.rs.force_shoulder[1]) > 30:
+            self.fr_count += 1
+
+        if self.fr_count > 5:
+            F = -J_inv @ self.Cch[15:18, :]
+            Ccs[7, :] = F[2, :].copy()
+            f_cte_l[0] = 30
+            f_cte_u[0] = 35
+        else:
+            Ccs[7, :] = 0
+
+        J = self.pin_engine.linear_leg_jacobian("RL", "thigh")
+        J_inv = np.linalg.pinv(J).T
+        self.rs.force_shoulder[3] = -J_inv @ self.cs.tau[9:]
+        if np.linalg.norm(self.rs.force_shoulder[3]) > 30:
+            F = -J_inv @ self.Cch[21:24, :]
+            Ccs[8, :] = F[2, :].copy()
+            f_cte_l[1] = 30
+            f_cte_u[1] = 35
+        else:
+            Ccs[8, :] = 0
+
+        l = np.vstack((dist + nJq0, knee_lower, f_cte_l.reshape(-1, 1)))
+        u = np.vstack((np.full((7, 1), np.inf), f_cte_u.reshape(-1, 1)))
+        self.lcs = np.tile(l, (self.N, 1))
+        self.ucs = np.tile(u, (self.N, 1))
+
+        Phi_cons[:self.ncs, :] = Ccs @ self.Aa
+        aux_cons = Ccs @ self.Ba
+
+        return aux_cons, Phi_cons
+
+    def build_reference(self):
+        pass
 
     def roty(self, theta):
         theta = np.pi * theta / 180
         c, s = np.cos(theta), np.sin(theta)
         return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
-
-    def build_reference(self):
-        pass
