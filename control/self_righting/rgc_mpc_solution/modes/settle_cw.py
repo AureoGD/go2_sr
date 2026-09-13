@@ -3,8 +3,9 @@ import pinocchio as pin
 from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
-from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
+from control.self_righting.rgc_mpc_solution.constraints.support_polytope import support_polytope
 from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
+from control.self_righting.rgc_mpc_solution.constraints.capture_point import CapturePointConstraint
 
 
 class SettleCW(BaseRGCController):
@@ -16,16 +17,20 @@ class SettleCW(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
         self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 6  # joint pos (2, 1), body orientation (4, 1)
+        self.ny = 7  # joint pos (2, 1), body orientation (4, 1)
 
         # Constraints slices
-        self.nch = 28  # qr (12, 1), CoM projection (6, 1)
+        self.i_qr = slice(0, 12)
+        self.i_com = slice(self.i_qr.stop, self.i_qr.stop + 4)
+        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 4)
+        self.i_grf = slice(self.i_xi.stop, self.i_xi.stop + 10)
+        self.nch = self.i_grf.stop
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -44,25 +49,25 @@ class SettleCW(BaseRGCController):
         self.Ba[self.nx:, :] = np.identity(self.nu)
 
         # Body orientation
-        self.Cy[:4, 18:22] = np.eye(4)
-        self.Cy[4,3] = 1
-        self.Cy[5,7] = 1
-
+        self.Cy[0, 17] = 1
+        self.Cy[1, 3] = 1
+        self.Cy[2, 7] = 1
+        self.Cy[3:, 18:22] = np.eye(4)
         self.Cch[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qeps = 0.5 * np.diag(np.array([1, 1, 1, 1]))
+        Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))
         Qq = 0.01 * np.diag(np.array([1, 1]))
+        Qz = 0.05 * np.diag(np.array([1]))
 
-        Q = block_diag(Qeps, Qq)
+        Q = block_diag(Qz, Qq, Qeps)
         self.Q = block_diag(*[Q] * self.N)
         # Update control action weight matrix
-        Rp = np.diag(np.array([1, 1, 1]))
+        Rp = np.diag(np.array([5, 5, 5]))
         Rs = np.diag(np.array([1, 1, 1]))
 
-
-        R = block_diag(0.75*Rp, 2*Rs, Rp, 2*Rs)
+        R = block_diag(1.1 * Rp, 1 * Rs, Rp, 1 * Rs)
         self.R = block_diag(*[R] * self.M)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
@@ -72,8 +77,6 @@ class SettleCW(BaseRGCController):
         self.contacts = np.zeros((4, 3), dtype=np.float32)
 
         self.first_int = True
-
-        self.cheby_center_solver = ChebyshevCenterSolver()
 
         # ----------------------------------------
         # Low-level mode controller gains
@@ -88,7 +91,10 @@ class SettleCW(BaseRGCController):
         # ----------------------------------------
         # Constraints
         # ----------------------------------------
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
+
+        self.Cch[self.i_qr, self.nx:] = np.identity(12)
+
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 20])
         foot_u = np.array([0, 0, np.inf, np.inf, 75])
 
         # Stack for all 2 feet
@@ -137,16 +143,20 @@ class SettleCW(BaseRGCController):
             if pivot is not None:
                 Sa[3 * i:3 * (i + 1), :] = self.skew_symmetric_matrix(foot - pivot)
 
+        gamma = Jc.copy()
+        gamma[0:3, 0:3] -= self.pin_engine.linear_leg_jacobian('FR', "thigh")
+        gamma[3:6, 0:3] -= self.pin_engine.linear_leg_jacobian('FR', "thigh")
+        gamma[6:9, 6:9] -= self.pin_engine.linear_leg_jacobian('RR', "thigh")
+        gamma[9:12, 6:9] -= self.pin_engine.linear_leg_jacobian('RR', "thigh")
+
+        self.Jinv = np.linalg.pinv(Jc.T)
+
         self.contacts[0, :] = self.pin_engine.frame_pos('FL', "foot")
         self.contacts[1, :] = self.pin_engine.frame_pos('RL', "foot")
         self.contacts[2, :] = pivot_f
         self.contacts[3, :] = pivot_r
 
-        gamma = Jc
-
         gamma_a_star = np.linalg.inv(gamma) @ Sa
-
-        self.Jinv = np.linalg.inv(Jc.T)
 
         I_com = self.pin_engine.centroidal_inertia()
         mass = self.total_mass
@@ -162,8 +172,8 @@ class SettleCW(BaseRGCController):
         comp_grav = S @ np.array([0, 0, mass])
         term_grav = I_inv @ comp_grav
 
-        k3 = I_inv @ gamma_a_star.T @ self.Kp_mtx
-        k4 = I_inv @ gamma_a_star.T @ self.Kd_mtx
+        k3 = I_inv @ Sa.T @ self.Kp_mtx @ self.Jinv
+        k4 = I_inv @ Sa.T @ self.Kd_mtx @ self.Jinv
 
         self.A[0:3, 0:3] = -k4 @ gamma_a_star
         self.A[0:3, 3:15] = -k3
@@ -191,26 +201,29 @@ class SettleCW(BaseRGCController):
         Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nch, self.nu))
 
-        _, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
-        self.Cch[22:, 15:17] = A_hex
+        A, bu, bl = support_polytope(self.contacts)
+        self.Cch[self.i_com, 15:17] = A
+
+        p_axis = np.sum(self.contacts[:, 2]) / 4
+        z = float(self.rs.r_pos[2] - p_axis)
+        omega_0 = np.sqrt(9.81 / max(z, 1e-6))
+        self.Cch[self.i_xi, 0:2] = A @ self.A[15:17, 0:2] / omega_0
+        self.Cch[self.i_xi, 15:17] = A
 
         pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
 
         J = np.zeros((6, 6))
         J[0:3, 0:3] = self.Jinv[3:6, 3:6]
         J[3:6, 3:6] = self.Jinv[9:12, 9:12]
-        self.Cch[12:22, :] = -pyramid_fric_matrix[0:10, 0:6] @ J @ self.L
+        self.Cch[self.i_grf, :] = -pyramid_fric_matrix[0:10, 0:6] @ J @ self.L
 
         Phi_cons[0:self.nch, :] = self.Cch @ self.Aa
         aux_cons = self.Cch @ self.Ba
 
-        if self.first_int:
-
-            l = np.vstack((self.q_min.reshape(-1, 1), self.f_l.reshape(-1, 1), -self.com_const.reshape(-1, 1)))
-            u = np.vstack((self.q_max.reshape(-1, 1), self.f_u.reshape(-1, 1), b_hex.reshape(-1, 1)))
-            self.lch = np.tile(l, (self.N, 1))
-            self.uch = np.tile(u, (self.N, 1))
-            self.first_int = False
+        l = np.vstack((self.q_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1), self.f_l.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1), self.f_u.reshape(-1, 1)))
+        self.lch = np.tile(l, (self.N, 1))
+        self.uch = np.tile(u, (self.N, 1))
 
         return aux_cons, Phi_cons
 
@@ -218,5 +231,6 @@ class SettleCW(BaseRGCController):
         if self.first_int:
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
-            ref = np.vstack((epsRef.reshape(-1, 1), np.array([2.7]), np.array([2.7])))
+            ref = np.vstack((np.array([0]), np.array([2.7]), np.array([2.7]), epsRef.reshape(-1, 1)))
+
             self.ref = np.tile(ref, (self.N, 1))
