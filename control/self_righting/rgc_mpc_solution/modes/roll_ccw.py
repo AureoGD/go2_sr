@@ -1,9 +1,7 @@
 import numpy as np
-import pinocchio as pin
 from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
-from control.self_righting.rgc_mpc_solution.constraints.chebyshev_center import ChebyshevCenterSolver
 from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
 from control.self_righting.rgc_mpc_solution.utils.build_gamma_star import GammaBuilder, CONFIGS
 from control.self_righting.rgc_mpc_solution.constraints.capture_point import CapturePointConstraint
@@ -19,7 +17,7 @@ class RollCCW(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -31,7 +29,8 @@ class RollCCW(BaseRGCController):
         self.i_qr = slice(0, 12)
         self.i_tau = slice(self.i_qr.stop, self.i_qr.stop + 12)
         self.i_com = slice(self.i_tau.stop, self.i_tau.stop + 5)
-        self.nch = self.i_com.stop
+        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 5)
+        self.nch = self.i_xi.stop
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -57,14 +56,14 @@ class RollCCW(BaseRGCController):
 
         self.gamma_builder = GammaBuilder(self.pin_engine, CONFIGS["roll_ccw"], self.Kp_vec, self.Kd_vec, 2)
 
-        Qq = np.diag(np.array([1, 1, 1]))
-        Qeps = 4 * np.diag(np.array([1, 1, 1, 1]))
+        Qq = 2.5 * np.diag(np.array([1, 1, 1]))
+        Qeps = 5 * np.diag(np.array([1, 1, 1, 1]))
 
         Q = block_diag(Qeps, Qq)
         self.Q = block_diag(*[Q] * self.N)
 
         # References
-        qr = np.array([-0.6, 3.75, -1.5]).reshape(3, 1)
+        qr = np.array([-0.8, 4, -1.8]).reshape(3, 1)
         qeps = np.array([0, 0, 0, 1]).reshape(4, 1)
 
         ref = np.vstack((qeps, qr))
@@ -72,9 +71,10 @@ class RollCCW(BaseRGCController):
         self.ref = np.tile(ref, (self.N, 1))
 
         # Control action weight matrix
-        R_pivot = np.diag(np.array([15, 20, 20]))
+        R_pivot = np.diag(np.array([10, 100, 100]))
         R_fixed = np.diag(np.array([1, 1, 1]))
-        R_rear = np.diag(np.array([1, 1, 1]))
+        R_rear = 0.1 * np.diag(np.array([1, 1, 1]))
+
 
         R = block_diag(R_fixed, R_pivot, R_rear, R_pivot)
         self.R = block_diag(*[R] * self.M)
@@ -114,15 +114,15 @@ class RollCCW(BaseRGCController):
         self.ncs = 8
         self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
 
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
-        foot_u = np.array([0, 0, np.inf, np.inf, 150])
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 5])
+        foot_u = np.array([0, 0, np.inf, np.inf, 200])
 
         self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))
         self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))
 
-        w_grf = np.array([1., 1., 1., 1., 1.])
-        w_nf = np.array([1., 1.])
-        w_pc = np.array([5])
+        w_grf = np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+        w_nf = np.array([0.5, 0.5])
+        w_pc = np.array([20])
 
         wcs = np.vstack((w_grf.reshape(-1, 1), w_nf.reshape(-1, 1), w_pc.reshape(-1, 1)))
 
@@ -130,7 +130,8 @@ class RollCCW(BaseRGCController):
 
         self.Is = np.concatenate((np.zeros((3, 3)), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        self.last_pk = None
+        self.omega_0 = None
+
 
     def update_model(self):
         x, y, z, w = self.rs.epsilon
@@ -189,10 +190,17 @@ class RollCCW(BaseRGCController):
         Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nch, self.nu))
 
-        A, b = support_polytope(self.contacts)
+        r = self.x[18:21].reshape(3,)
+        omega_0, _, _, _= self.capture_point.update_geometry(self.contacts[3, :], self.contacts[0, :], r)
+
+        A, bu, bl = support_polytope(self.contacts)
         self.Cch[self.i_com, 18:20] = A
-        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1), -self.com_const.reshape(-1, 1)))
-        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1), b.reshape(-1, 1)))
+
+        self.Cch[self.i_xi, 18:20] = A
+        self.Cch[self.i_xi, 0:2] = A/omega_0
+
+        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1)))
 
         self.lch = np.tile(l, (self.N, 1))
         self.uch = np.tile(u, (self.N, 1))
@@ -219,13 +227,13 @@ class RollCCW(BaseRGCController):
         r = self.x[18:21].reshape(3,)
         dr = self.x[0:3].reshape(3,)
 
-        self.capture_point.update_geometry(self.contacts[3, :], self.contacts[0, :], r)
         coeff_rcom, coeff_drcom, l_csi = self.capture_point.constraint_row()
 
         xi = self.capture_point.capture_point(r, dr)
         xi = xi.reshape(3,)
         cv = self.capture_point.constraint_value(xi)
         self.capture_point.update_crossings(xi, r)
+
         self.dg.cv = cv
 
         self.Ccs[7, 0:3] = coeff_drcom
@@ -244,7 +252,7 @@ class RollCCW(BaseRGCController):
         self.task_state.com_trig_signal = self.capture_point.com_crossed
 
         return aux_cs, Phi_cs
-
+    
     def build_reference(self):
         # if self.first_int:
         yaw = self.rs.rpy[2]

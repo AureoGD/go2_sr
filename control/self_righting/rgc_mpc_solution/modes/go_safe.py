@@ -14,7 +14,7 @@ class GoSafe(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints

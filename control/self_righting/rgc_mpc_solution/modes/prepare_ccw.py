@@ -17,7 +17,7 @@ class PrepareCCW(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -94,7 +94,7 @@ class PrepareCCW(BaseRGCController):
         qr = np.array([[0.00, 1.00, -2.60,
                         1.05, 1.50, -2.30, 
                         1.02, 4.15, -2.20,
-                        1.05, 1.50, -2.30]]).transpose()  
+                        1.05, 1.50, -2.00]]).transpose()  
 
         self.ref = np.tile(qr, (self.N, 1))
 

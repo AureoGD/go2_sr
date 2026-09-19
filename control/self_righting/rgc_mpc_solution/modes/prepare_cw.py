@@ -16,7 +16,7 @@ class PrepareCW(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -68,7 +68,7 @@ class PrepareCW(BaseRGCController):
 
         self.Cch[self.i_qr, 12:] = np.identity(12)
 
-        Ke = np.diag(self.Kp_vec)-np.diag(self.Kd_vec)@self.Lambda
+        Ke = np.diag(self.Kp_vec) - np.diag(self.Kd_vec) @ self.Lambda
         self.Cch[self.i_tau, :12] = -Ke
         self.Cch[self.i_tau, 12:] = Ke
 
@@ -90,10 +90,10 @@ class PrepareCW(BaseRGCController):
         # ----------------------------------------
         # Reference
         # ----------------------------------------
-        qr = np.array([[ -1.05, 1.50, -2.30,
-                         -0.00, 1.00, -2.60,
-                         -1.05, 1.50, -2.30,
-                         -1.02, 4.15, -2.20]]).transpose() 
+        qr = np.array([[-1.05, 1.50, -2.00,
+                        -0.00, 1.00, -2.60,
+                        -1.05, 1.50, -2.00,
+                        -1.02, 4.15, -2.20]]).transpose()
 
         self.ref = np.tile(qr, (self.N, 1))
 
@@ -122,10 +122,9 @@ class PrepareCW(BaseRGCController):
 
         self.wcs_grf = 2
 
-        wcs = np.vstack((self.wcs_collision * np.ones((6, 1)),
-                         np.array([[self.wcs_plane]]),
-                         self.wcs_grf * np.ones((2, 1))))
-        
+        wcs = np.vstack((self.wcs_collision * np.ones((6, 1)), np.array([[self.wcs_plane]]), self.wcs_grf * np.ones(
+            (2, 1))))
+
         self.wcs = np.tile(wcs, (self.N, 1))
 
         self.first_int = True
