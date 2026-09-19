@@ -20,7 +20,7 @@ class StandUp(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 10 * 2
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -55,7 +55,8 @@ class StandUp(BaseRGCController):
         # ground reaction qr (12, 1), CoM projection (6, 1), forces (20, 1)
         self.i_qr = slice(0, 12)
         self.i_com = slice(self.i_qr.stop, self.i_qr.stop + 6)
-        self.i_grf = slice(self.i_com.stop, self.i_com.stop + 20)
+        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 6)
+        self.i_grf = slice(self.i_xi.stop, self.i_xi.stop + 20)
         self.nch = self.i_grf.stop
 
         self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
@@ -69,7 +70,7 @@ class StandUp(BaseRGCController):
         self.gamma_builder = GammaBuilder(self.pin_engine, CONFIGS["stand_up"], self.Kp_vec, self.Kd_vec, 2)
 
         # Output weight matrix
-        Q_rz = 1 * np.diag(np.array([1, 1, 10]))
+        Q_rz = 1 * np.diag(np.array([1, 1,20]))
         Q_eps = 10 * np.diag(np.array([1, 1, 1, 1]))
         Q_dr = 1 * np.eye(3)
         Q_omega = 1 * np.eye(3)
@@ -84,6 +85,7 @@ class StandUp(BaseRGCController):
 
         self.R = block_diag(*[R] * self.M)
 
+        self.R[self.M * self.nu:self.M - 1 * self.nu, self.M * self.nu - 1:self.M * self.nu] *= 10
         # ----------------------------------------
         # Constraints
         # ----------------------------------------
@@ -184,12 +186,15 @@ class StandUp(BaseRGCController):
 
         self.Cch[self.i_grf, :] = -pyramid_fric_matrix @ self.Jinv @ self.L
 
-        #
-
         _xy, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
         self.Cch[self.i_com, 18:20] = A_hex
-        l = np.vstack((self.q_min.reshape(-1, 1), self.com_const.reshape(-1, 1), self.f_l.reshape(-1, 1)))
-        u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), self.f_u.reshape(-1, 1)))
+        p_axis = np.sum(self.contacts[:,2])/4
+        z = float(self.rs.r_pos[2]-p_axis)
+        omega_0 = np.sqrt(9.81/ max(z, 1e-6))
+        self.Cch[self.i_xi, 0:2] = A_hex/omega_0
+        self.Cch[self.i_xi, 18:20] = A_hex
+        l = np.vstack((self.q_min.reshape(-1, 1), self.com_const.reshape(-1, 1), self.com_const.reshape(-1, 1), self.f_l.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), b_hex.reshape(-1, 1), self.f_u.reshape(-1, 1)))
         self.lch = np.tile(l, (self.N, 1))
         self.uch = np.tile(u, (self.N, 1))
         if self.first_cont_interation:

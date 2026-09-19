@@ -114,7 +114,7 @@ class CapturePointConstraint:
         # the plain vertical height is correct even on a slope).
         z = float(r_com[2] - self.p_axis[2])
         self.omega_zero = np.sqrt(self.g / max(z, 1e-6))
-        return self.n_side, self.p_axis, self.ok
+        return self.omega_zero, self.n_side, self.p_axis, self.ok
 
     # ----------------------------------------------------------------------
     # Capture point and constraint pieces

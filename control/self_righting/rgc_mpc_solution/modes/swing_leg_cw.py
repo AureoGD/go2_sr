@@ -1,9 +1,7 @@
 import numpy as np
-import pinocchio as pin
 from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.utils.swing_planner import SwingFootPlanner
 
-from control.self_righting.rgc_mpc_solution.utils.geometry import plane_normal
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
 from control.self_righting.rgc_mpc_solution.utils.build_gamma_star import GammaBuilder, CONFIGS
 
@@ -21,7 +19,7 @@ class SwingLegCW(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -32,8 +30,9 @@ class SwingLegCW(BaseRGCController):
         # Constraints slices
         self.i_qr = slice(0, 12)
         self.i_tau = slice(self.i_qr.stop, self.i_qr.stop + 12)
-        self.i_com = slice(self.i_tau.stop, self.i_tau.stop + 5)
-        self.nch = self.i_tau.stop
+        self.i_com = slice(self.i_tau.stop, self.i_tau.stop + 4)
+        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 4)
+        self.nch = self.i_xi.stop
 
         # ----------------------------------------
         # Low-level mode controller gains
@@ -85,9 +84,9 @@ class SwingLegCW(BaseRGCController):
         # Weights
         # ----------------------------------------
 
-        Qeps = 0.5 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
-        Q_pf = 2 * np.diag(np.array([1, 1, 1]))  # FL foot (P1)
-        Q_pr = 2 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
+        Qeps = 0.05 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
+        Q_pf = 5 * np.diag(np.array([1, 1, 1]))  # FL foot (P1)
+        Q_pr = 5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
         Q_q = np.diag(np.array([1]))
 
         Q = block_diag(Qeps, Q_q, Q_q, Q_pf, Q_pr)
@@ -200,15 +199,19 @@ class SwingLegCW(BaseRGCController):
         self.Cch[self.i_tau, 3:6] = self.Kd_mtx @ ga
 
     def build_hard_constraint_matrices(self):
+        r = self.x[18:21].reshape(3,)
+        omega_0, _, _, _ = self.capture_point.update_geometry(self.contacts[1, :], self.contacts[2, :], r)
 
-        if self.first_int:
-            l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
-            u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
+        A, bu, bl = support_polytope(self.contacts)
+        self.Cch[self.i_com, 18:20] = A
 
-            self.lch = np.tile(l, (self.N, 1))
-            self.uch = np.tile(u, (self.N, 1))
+        self.Cch[self.i_xi, 18:20] = A
+        self.Cch[self.i_xi, 0:2] = A / omega_0
 
-            self.first_int = False
+        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1)))
+        self.lch = np.tile(l, (self.N, 1))
+        self.uch = np.tile(u, (self.N, 1))
 
         Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nch, self.nu))
@@ -225,7 +228,6 @@ class SwingLegCW(BaseRGCController):
         r = self.x[18:21].reshape(3,)
         dr = self.x[0:3].reshape(3,)
 
-        self.capture_point.update_geometry(self.contacts[1, :], self.contacts[2, :], r)
         coeff_rcom, coeff_drcom, l_csi = self.capture_point.constraint_row()
 
         xi = self.capture_point.capture_point(r, dr)
@@ -251,6 +253,7 @@ class SwingLegCW(BaseRGCController):
         sw_foot_rear = self.x[29:32]
 
         if self.first_int:
+            self.first_int = False
             self.leg_path.update_geometry(sw_foot_front, sw_foot_rear, self.contacts)
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)

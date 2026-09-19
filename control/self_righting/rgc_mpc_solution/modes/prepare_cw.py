@@ -1,5 +1,4 @@
 import numpy as np
-import pinocchio as pin
 from scipy.linalg import block_diag
 
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController

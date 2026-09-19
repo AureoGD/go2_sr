@@ -1,11 +1,9 @@
 import numpy as np
-import pinocchio as pin
 from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
 from control.self_righting.rgc_mpc_solution.constraints.support_polytope import support_polytope
 from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
-from control.self_righting.rgc_mpc_solution.constraints.capture_point import CapturePointConstraint
 
 
 class SettleCW(BaseRGCController):
@@ -50,24 +48,25 @@ class SettleCW(BaseRGCController):
 
         # Body orientation
         self.Cy[0, 17] = 1
-        self.Cy[1, 3] = 1
-        self.Cy[2, 7] = 1
+        self.Cy[1, 4] = 1
+        self.Cy[2, 10] = 1
         self.Cy[3:, 18:22] = np.eye(4)
+
         self.Cch[0:12, 23:] = np.identity(12)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qeps = 0.1 * np.diag(np.array([1, 1, 1, 1]))
+        Qeps = 1 * np.diag(np.array([1, 1, 1, 1]))
         Qq = 0.01 * np.diag(np.array([1, 1]))
-        Qz = 0.05 * np.diag(np.array([1]))
+        Qz = 1.25 * np.diag(np.array([1]))
 
         Q = block_diag(Qz, Qq, Qeps)
         self.Q = block_diag(*[Q] * self.N)
         # Update control action weight matrix
-        Rp = np.diag(np.array([5, 5, 5]))
+        Rp = np.diag(np.array([2.5, 2.5, 2.5]))
         Rs = np.diag(np.array([1, 1, 1]))
 
-        R = block_diag(1.1 * Rp, 1 * Rs, Rp, 1 * Rs)
+        R = block_diag(0.9 * Rp, Rs, Rp, Rs)
         self.R = block_diag(*[R] * self.M)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
@@ -94,8 +93,8 @@ class SettleCW(BaseRGCController):
 
         self.Cch[self.i_qr, self.nx:] = np.identity(12)
 
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 20])
-        foot_u = np.array([0, 0, np.inf, np.inf, 75])
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
+        foot_u = np.array([0, 0, np.inf, np.inf, 100])
 
         # Stack for all 2 feet
         self.f_l = np.tile(foot_l.reshape(-1, 1), (2, 1))
@@ -231,6 +230,6 @@ class SettleCW(BaseRGCController):
         if self.first_int:
             yaw = self.rs.rpy[2]
             epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
-            ref = np.vstack((np.array([0]), np.array([2.7]), np.array([2.7]), epsRef.reshape(-1, 1)))
+            ref = np.vstack((np.array([0]), np.array([2.5]), np.array([2.5]), epsRef.reshape(-1, 1)))
 
             self.ref = np.tile(ref, (self.N, 1))
