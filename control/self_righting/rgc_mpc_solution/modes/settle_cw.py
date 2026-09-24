@@ -2,6 +2,7 @@ import numpy as np
 from scipy.linalg import block_diag
 from control.self_righting.rgc_mpc_solution.rgc_base_controller import BaseRGCController
 from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_reference
+from control.self_righting.rgc_mpc_solution.utils.geometry import plane_normal
 from control.self_righting.rgc_mpc_solution.constraints.support_polytope import support_polytope
 from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
 
@@ -48,6 +49,7 @@ class SettleCW(BaseRGCController):
 
         # Body orientation
         self.Cy[0, 17] = 1
+        self.Cy[0, 17] = 1
         self.Cy[1, 4] = 1
         self.Cy[2, 10] = 1
         self.Cy[3:, 18:22] = np.eye(4)
@@ -56,9 +58,9 @@ class SettleCW(BaseRGCController):
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qeps = 1 * np.diag(np.array([1, 1, 1, 1]))
+        Qeps = 0.25 * np.diag(np.array([1, 1, 1, 1]))
         Qq = 0.01 * np.diag(np.array([1, 1]))
-        Qz = 1.25 * np.diag(np.array([1]))
+        Qz = 0.125 * np.diag(np.array([1]))
 
         Q = block_diag(Qz, Qq, Qeps)
         self.Q = block_diag(*[Q] * self.N)
@@ -66,7 +68,7 @@ class SettleCW(BaseRGCController):
         Rp = np.diag(np.array([2.5, 2.5, 2.5]))
         Rs = np.diag(np.array([1, 1, 1]))
 
-        R = block_diag(0.9 * Rp, Rs, Rp, Rs)
+        R = block_diag(Rp, Rs, Rp, Rs)
         self.R = block_diag(*[R] * self.M)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
@@ -229,7 +231,12 @@ class SettleCW(BaseRGCController):
     def build_reference(self):
         if self.first_int:
             yaw = self.rs.rpy[2]
-            epsRef, _ = eps_reference(current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
+            n, _ = plane_normal(self.contacts)
+            self.task_state.plane_normal = n
+            epsRef, _ = eps_reference(current_yaw=yaw,
+                                      plane_normal=n,
+                                      desired_yaw=None,
+                                      current_epsilon=self.rs.epsilon)
             ref = np.vstack((np.array([0]), np.array([2.5]), np.array([2.5]), epsRef.reshape(-1, 1)))
 
             self.ref = np.tile(ref, (self.N, 1))
