@@ -5,6 +5,7 @@ from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_r
 from control.self_righting.rgc_mpc_solution.utils.geometry import plane_normal
 from control.self_righting.rgc_mpc_solution.constraints.support_polytope import support_polytope
 from control.self_righting.rgc_mpc_solution.constraints.pyramid_friction import pyramid_friction
+from control.self_righting.rgc_mpc_solution.utils.build_gamma_star import GammaBuilder, CONFIGS
 
 
 class SettleCW(BaseRGCController):
@@ -14,22 +15,23 @@ class SettleCW(BaseRGCController):
 
         self.phase = 5
 
+        # ----------------------------------------
+        # Low-level mode controller gains
+        # ----------------------------------------
+
+        self.Kp_vec = np.ones(12) * self.kp
+        self.Kd_vec = np.ones(12) * self.kd
+
         # Predic and control horizons and sampe time
         self.N = 20
         self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
-        self.nx = 23  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
-        self.nu = 12  # delta qr (12, 1)
-        self.ny = 7  # joint pos (2, 1), body orientation (4, 1)
 
-        # Constraints slices
-        self.i_qr = slice(0, 12)
-        self.i_com = slice(self.i_qr.stop, self.i_qr.stop + 4)
-        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 4)
-        self.i_grf = slice(self.i_xi.stop, self.i_xi.stop + 10)
-        self.nch = self.i_grf.stop
+        self.nx = 26  # CoM lin vel (3, 1), CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
+        self.nu = 12  # delta qr (12, 1)
+        self.ny = 7  # CoM position (3, 1), body orientation (4, 1), CoM linear vel. (3, 1), and CoM ang. vel. (3, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -40,162 +42,144 @@ class SettleCW(BaseRGCController):
         self.Ba = np.zeros((self.nx + self.nu, self.nu), dtype=np.float32)
         self.Cy = np.zeros((self.ny, self.nx + self.nu), dtype=np.float32)
 
-        # Constraint matrix
-        self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
+        self.damping = 2
+        self.Lambda = np.diag(self.Kp_vec / (self.Kd_vec + self.damping))
+        self.Lambda[0, 0] = 0
+        self.Lambda[3:6, 3:6] = 0
+        self.Lambda[6, 6] = 0
+        self.Lambda[9:, 9:] = 0
 
         # Initialize constans
-        self.Aa[self.nx:, self.nx:] = np.identity(self.nu)
-        self.Ba[self.nx:, :] = np.identity(self.nu)
+        self.A[2, 25] = 1
+        self.A[6:18, 6:18] = -self.Lambda
+        self.A[18:21, 0:3] = np.identity(3)
 
-        # Body orientation
-        self.Cy[0, 17] = 1
-        self.Cy[0, 17] = 1
-        self.Cy[1, 4] = 1
-        self.Cy[2, 10] = 1
-        self.Cy[3:, 18:22] = np.eye(4)
+        self.B[6:18, :] = self.Lambda
 
-        self.Cch[0:12, 23:] = np.identity(12)
+        self.Aa[26:, 26:] = np.identity(self.nu)
+        self.Ba[26:, :] = np.identity(self.nu)
 
         self.Is = np.concatenate((np.identity(3), np.identity(3), np.identity(3), np.identity(3)), axis=1)
 
-        Qeps = 0.25 * np.diag(np.array([1, 1, 1, 1]))
-        Qq = 0.01 * np.diag(np.array([1, 1]))
-        Qz = 0.125 * np.diag(np.array([1]))
+        # OUTPUT MATRIX:
+        self.Cy[0, 20] = 1  # z CoM
+        self.Cy[1:5, 21:25] = np.eye(4)
+        self.Cy[5, 7] = 1  # FR
+        self.Cy[6, 13] = 1  # RR
 
-        Q = block_diag(Qz, Qq, Qeps)
+        # Constraints
+        self.i_qr = slice(0, 12)
+        self.i_com = slice(self.i_qr.stop, self.i_qr.stop + 4)
+        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 4)
+        self.nch = self.i_xi.stop
+
+        self.Cch = np.zeros((self.nch, self.nx + self.nu), dtype=np.float32)
+
+        self.Cch[self.i_qr, self.nx:] = np.identity(12)
+
+        self.gamma_builder = GammaBuilder(self.pin_engine, CONFIGS["settle_cw"], self.Kp_vec, self.Kd_vec, 2)
+
+        # ----------------------------------------
+        # Weights
+        # ----------------------------------------
+        Qeps = 3 * np.diag(np.array([1, 1, 1, 1]))
+        Qq = 0.1 * np.diag(np.array([1, 1]))
+        Qz = 1.25 * np.diag(np.array([1]))
+
+        Q = block_diag(Qz, Qeps, Qq)
         self.Q = block_diag(*[Q] * self.N)
+
         # Update control action weight matrix
-        Rp = np.diag(np.array([2.5, 2.5, 2.5]))
+        Rp = np.diag(np.array([1, 40, 40]))
         Rs = np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rp, Rs, Rp, Rs)
         self.R = block_diag(*[R] * self.M)
 
-        self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
-
-        self.Jinv = np.zeros((12, 12), dtype=np.float32)
-
-        self.contacts = np.zeros((4, 3), dtype=np.float32)
-
-        self.first_int = True
-
-        # ----------------------------------------
-        # Low-level mode controller gains
-        # ----------------------------------------
-
-        self.Kp_vec = np.ones(12) * self.kp
-        self.Kd_vec = np.ones(12) * self.kd
-
-        self.Kp_mtx = np.diag(self.Kp_vec)
-        self.Kd_mtx = np.diag(self.Kd_vec)
+        self.R[self.M * self.nu:self.M - 1 * self.nu, self.M * self.nu - 1:self.M * self.nu] *= 10
 
         # ----------------------------------------
         # Constraints
         # ----------------------------------------
+        foot_l1 = np.array([-np.inf, -np.inf, 0, 0, 20])
+        foot_u1 = np.array([0, 0, np.inf, np.inf, 75])
 
-        self.Cch[self.i_qr, self.nx:] = np.identity(12)
+        foot_l2 = np.array([-np.inf, -np.inf, -np.inf, -np.inf, 15])
+        foot_u2 = np.array([np.inf, np.inf, np.inf, np.inf, 75])
 
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 10])
-        foot_u = np.array([0, 0, np.inf, np.inf, 100])
+        self.f_l = np.vstack(
+            (foot_l2.reshape(-1, 1), foot_l1.reshape(-1, 1), foot_l2.reshape(-1, 1), foot_l1.reshape(-1, 1)))
+        self.f_u = np.vstack(
+            (foot_u2.reshape(-1, 1), foot_u1.reshape(-1, 1), foot_u2.reshape(-1, 1), foot_u1.reshape(-1, 1)))
 
-        # Stack for all 2 feet
-        self.f_l = np.tile(foot_l.reshape(-1, 1), (2, 1))
-        self.f_u = np.tile(foot_u.reshape(-1, 1), (2, 1))
+        self.L = np.zeros((12, self.nx + self.nu), dtype=np.float32)
+        self.L[:, 6:18] = -self.kp * np.identity(12)
+        self.L[:, 26:] = self.kp * np.identity(12)
 
-        self.L = np.zeros((6, self.nx + self.nu), dtype=np.float32)
-        self.L[0:3, 6:9] = -self.kp * np.identity(3)
-        self.L[0:3, 26:29] = self.kp * np.identity(3)
+        self.Jinv = None
+        self.contacts = np.zeros((4, 3), dtype=np.float32)
 
-        self.L[3:6, 12:15] = -self.kp * np.identity(3)
-        self.L[3:6, 32:35] = self.kp * np.identity(3)
+        self.first_int = True
+
+        self.ncs = 20
+        self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
+        w_grf = np.array([0.5, 0.5, 0.5, 0.5, 0.5])
+        wcs = np.vstack((0.01 * w_grf, 1 * w_grf, 0.01 * w_grf, 1 * w_grf))
+
+        self.wcs = np.tile(wcs, (self.N, 1))
 
     def update_model(self):
+
+        r = self.rs.r_pos
+
         x, y, z, w = self.rs.epsilon
 
         T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
 
-        J_com = self.pin_engine.com_jacobian()
+        I = self.pin_engine.centroidal_inertia()
+        Iinv = np.linalg.inv(I)
 
-        pivot_f = self.pin_engine.frame_pos("FR", "thigh")
-        pivot_r = self.pin_engine.frame_pos("RR", "thigh")
+        gamma_l_star, gamma_a_star, _, Sa, Jc = self.gamma_builder.build(r, use_gamma_e=False)
 
-        Jc = np.zeros((12, 12))
-        Sa = np.zeros((12, 3))
+        self.contacts[0, :] = self.pin_engine.frame_pos("FR", "thigh")
+        self.contacts[1, :] = self.pin_engine.frame_pos("FL", "foot")
+        self.contacts[2, :] = self.pin_engine.frame_pos("RR", "thigh")
+        self.contacts[3, :] = self.pin_engine.frame_pos("RL", "foot")
 
-        pivot_map = {
-            "FR": pivot_f,
-            "FL": pivot_f,
-            "RR": pivot_r,
-            "RL": pivot_r,
-        }
+        self.Jinv = (np.linalg.pinv(Jc.T))
 
-        foot_positions = {}
-        for i, leg in enumerate(self.leg_names):
-            s = slice(3 * i, 3 * (i + 1))
+        k1 = (self.kp / self.total_mass) * self.Is @ self.Jinv
+        k2 = (self.kd / self.total_mass) * self.Is @ self.Jinv
+        k3 = self.kp * Iinv @ -Sa.T @ self.Jinv
+        k4 = self.kd * Iinv @ -Sa.T @ self.Jinv
 
-            Jc[s, s] = self.pin_engine.linear_leg_jacobian(leg, "foot")
+        self.A[0:3, 0:3] = k2 @ gamma_l_star
+        self.A[0:3, 3:6] = -k2 @ gamma_a_star
+        self.A[0:3, 6:18] = k1
 
-            foot = self.pin_engine.frame_pos(leg, "foot")
+        self.A[3:6, 0:3] = k4 @ gamma_l_star
+        self.A[3:6, 3:6] = -k4 @ gamma_a_star
+        self.A[3:6, 6:18] = k3
 
-            foot_positions[leg] = foot
+        self.A[6:18, 0:3] = gamma_l_star
+        self.A[6:18, 3:6] = -gamma_a_star
 
-            pivot = pivot_map[leg]
+        self.A[21:25, 3:6] = T.reshape(4, 3)
 
-            if pivot is not None:
-                Sa[3 * i:3 * (i + 1), :] = self.skew_symmetric_matrix(foot - pivot)
+        self.B[0:3, 0:12] = -k1
+        self.B[3:6, 0:12] = -k3
 
-        gamma = Jc.copy()
-        gamma[0:3, 0:3] -= self.pin_engine.linear_leg_jacobian('FR', "thigh")
-        gamma[3:6, 0:3] -= self.pin_engine.linear_leg_jacobian('FR', "thigh")
-        gamma[6:9, 6:9] -= self.pin_engine.linear_leg_jacobian('RR', "thigh")
-        gamma[9:12, 6:9] -= self.pin_engine.linear_leg_jacobian('RR', "thigh")
+        self.Aa[0:26, 0:26] = np.identity(self.nx) + self.ts * self.A
+        self.Aa[0:26, 26:] = self.ts * self.B
 
-        self.Jinv = np.linalg.pinv(Jc.T)
+        # dr, omega, q, r, eps, g, qr
+        self.x = np.vstack(
+            (self.rs.r_vel.reshape(-1, 1), self.rs.omega.reshape(-1, 1), self.rs.q.reshape(-1, 1),
+             self.rs.r_pos.reshape(-1, 1), self.rs.epsilon.reshape(-1,
+                                                                   1), np.array([[-9.81]]), self.cs.qr.reshape(-1, 1)))
 
-        self.contacts[0, :] = self.pin_engine.frame_pos('FL', "foot")
-        self.contacts[1, :] = self.pin_engine.frame_pos('RL', "foot")
-        self.contacts[2, :] = pivot_f
-        self.contacts[3, :] = pivot_r
-
-        gamma_a_star = np.linalg.inv(gamma) @ Sa
-
-        I_com = self.pin_engine.centroidal_inertia()
-        mass = self.total_mass
-
-        c_pivot = (pivot_f + pivot_r) / 2
-        r = self.rs.r_pos
-        lever = r.flatten() - c_pivot
-        S = self.skew_symmetric_matrix(lever)
-
-        I_pivot = I_com + mass * (S.T @ S)
-        I_inv = np.linalg.inv(I_pivot)
-
-        comp_grav = S @ np.array([0, 0, mass])
-        term_grav = I_inv @ comp_grav
-
-        k3 = I_inv @ Sa.T @ self.Kp_mtx @ self.Jinv
-        k4 = I_inv @ Sa.T @ self.Kd_mtx @ self.Jinv
-
-        self.A[0:3, 0:3] = -k4 @ gamma_a_star
-        self.A[0:3, 3:15] = -k3
-        self.A[0:3, 22] = term_grav
-
-        self.A[3:15, 0:3] = gamma_a_star
-
-        self.A[15:18, 0:3] = -S + J_com @ gamma_a_star
-
-        self.A[18:22, 0:3] = T.reshape(4, 3)
-
-        self.B[0:3, :] = k3
-
-        self.Aa[0:23, 0:23] = np.identity(self.nx) + self.ts * self.A
-        self.Aa[0:23, 23:] = self.ts * self.B
-
-        self.x = np.vstack((self.rs.omega.reshape(-1, 1), self.rs.q.reshape(-1, 1), self.rs.r_pos.reshape(-1, 1),
-                            self.rs.epsilon.reshape(-1, 1), np.array([[-9.81]]), self.cs.qr.reshape(-1, 1)))
-
-        self.L[0:3, 0:3] = -self.kd * gamma_a_star[3:6, :]
-        self.L[3:6, 0:3] = -self.kd * gamma_a_star[9:12, :]
+        self.L[:, 0:3] = -self.kd * gamma_l_star
+        self.L[:, 3:6] = self.kd * gamma_a_star
 
     def build_hard_constraint_matrices(self):
 
@@ -203,40 +187,47 @@ class SettleCW(BaseRGCController):
         aux_cons = np.zeros((self.nch, self.nu))
 
         A, bu, bl = support_polytope(self.contacts)
-        self.Cch[self.i_com, 15:17] = A
+        self.Cch[self.i_com, 18:20] = A
 
         p_axis = np.sum(self.contacts[:, 2]) / 4
         z = float(self.rs.r_pos[2] - p_axis)
         omega_0 = np.sqrt(9.81 / max(z, 1e-6))
         self.Cch[self.i_xi, 0:2] = A @ self.A[15:17, 0:2] / omega_0
-        self.Cch[self.i_xi, 15:17] = A
+        self.Cch[self.i_xi, 18:20] = A
 
-        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts[0:3, :], 0.7 / np.sqrt(2))
+        l = np.vstack((self.q_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1)))
 
-        J = np.zeros((6, 6))
-        J[0:3, 0:3] = self.Jinv[3:6, 3:6]
-        J[3:6, 3:6] = self.Jinv[9:12, 9:12]
-        self.Cch[self.i_grf, :] = -pyramid_fric_matrix[0:10, 0:6] @ J @ self.L
+        self.lch = np.tile(l, (self.N, 1))
+        self.uch = np.tile(u, (self.N, 1))
 
         Phi_cons[0:self.nch, :] = self.Cch @ self.Aa
         aux_cons = self.Cch @ self.Ba
 
-        l = np.vstack((self.q_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1), self.f_l.reshape(-1, 1)))
-        u = np.vstack((self.q_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1), self.f_u.reshape(-1, 1)))
-        self.lch = np.tile(l, (self.N, 1))
-        self.uch = np.tile(u, (self.N, 1))
-
         return aux_cons, Phi_cons
+
+    def build_soft_constraint_matrices(self):
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts, 0.7 / np.sqrt(2))
+
+        self.Ccs[:, :] = -pyramid_fric_matrix @ self.Jinv @ self.L
+
+        l = np.vstack((self.f_l.reshape(-1, 1)))
+        u = np.vstack((self.f_u.reshape(-1, 1)))
+        self.lcs = np.tile(l, (self.N, 1))
+        self.ucs = np.tile(u, (self.N, 1))
+
+        Phi_cs = np.zeros((self.ncs * self.N, self.nx + self.nu))
+        Phi_cs[0:self.ncs, :] = self.Ccs @ self.Aa
+        aux_cs = self.Ccs @ self.Ba
+
+        return aux_cs, Phi_cs
 
     def build_reference(self):
         if self.first_int:
             yaw = self.rs.rpy[2]
             n, _ = plane_normal(self.contacts)
             self.task_state.plane_normal = n
-            epsRef, _ = eps_reference(current_yaw=yaw,
-                                      plane_normal=n,
-                                      desired_yaw=None,
-                                      current_epsilon=self.rs.epsilon)
-            ref = np.vstack((np.array([0]), np.array([2.5]), np.array([2.5]), epsRef.reshape(-1, 1)))
+            epsRef, _ = eps_reference(current_yaw=yaw, plane_normal=n, current_epsilon=self.rs.epsilon)
+            ref = np.vstack((np.array([0]), epsRef.reshape(-1, 1), np.array([2.6]), np.array([2.6])))
 
             self.ref = np.tile(ref, (self.N, 1))

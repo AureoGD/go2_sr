@@ -29,8 +29,8 @@ class ProneCCW(BaseRGCController):
         # Low-level mode controller gains
         # ----------------------------------------
 
-        self.Kp_vec = np.ones(12) * self.kp * 0.15
-        self.Kd_vec = np.ones(12) * self.kd * 0.15
+        self.Kp_vec = np.ones(12) * self.kp * 0.5
+        self.Kd_vec = np.ones(12) * self.kd * 0.5
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -129,8 +129,7 @@ class ProneCCW(BaseRGCController):
             self.ref = np.tile(ref.reshape(-1, 1), (self.N, 1))
             self.stg1 = True
         if self.stg1 and not self.stg2:
-            if np.linalg.norm(self.ref[2] - self.rs.q[2]) < 0.20 and np.linalg.norm(self.ref[8] -
-                                                                                    self.rs.q[8]) < 0.20:
+            if np.linalg.norm(self.ref[2] - self.rs.q[2]) < 0.20 and np.linalg.norm(self.ref[8] - self.rs.q[8]) < 0.20:
                 ref = self.ref[0:12].copy()
                 ref[3] = 0
                 ref[9] = 0
@@ -146,4 +145,3 @@ class ProneCCW(BaseRGCController):
                 self.stg4 = True
 
         self.task_state.prone_final_stage = self.stg4
-

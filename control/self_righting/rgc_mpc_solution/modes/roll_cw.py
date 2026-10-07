@@ -231,10 +231,11 @@ class RollCW(BaseRGCController):
 
         xi = self.capture_point.capture_point(r, dr)
         xi = xi.reshape(3,)
+        self.rs.xi = (xi[0:2]).reshape(2,)
         cv = self.capture_point.constraint_value(xi)
         self.capture_point.update_crossings(xi, r)
 
-        self.dg.cv = cv
+        self.rs.xi_cv = cv
 
         self.Ccs[7, 0:3] = coeff_drcom
         self.Ccs[7, 18:21] = coeff_rcom

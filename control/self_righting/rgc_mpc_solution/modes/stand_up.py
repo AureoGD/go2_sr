@@ -20,14 +20,14 @@ class StandUp(BaseRGCController):
 
         # Predic and control horizons and sampe time
         self.N = 20
-        self.M = 10 * 2
+        self.M = 20
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
 
         self.nx = 26  # CoM lin vel (3, 1), CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 13  # CoM z position (1, 1), body orientation (4, 1), CoM linear vel. (3, 1), and CoM ang. vel. (3, 1)
+        self.ny = 13  # CoM position (3, 1), body orientation (4, 1), CoM linear vel. (3, 1), and CoM ang. vel. (3, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -70,18 +70,20 @@ class StandUp(BaseRGCController):
         self.gamma_builder = GammaBuilder(self.pin_engine, CONFIGS["stand_up"], self.Kp_vec, self.Kd_vec, 2)
 
         # Output weight matrix
-        Q_rz = 1 * np.diag(np.array([1, 1,20]))
-        Q_eps = 10 * np.diag(np.array([1, 1, 1, 1]))
-        Q_dr = 1 * np.eye(3)
-        Q_omega = 1 * np.eye(3)
+        Q_rz = np.diag(np.array([15, 15, 20]))
+        Q_eps = 1.5 * np.diag(np.array([1, 1, 1, 1]))
+        Q_dr = 0.1 * np.eye(3)
+        Q_omega = 0.1 * np.eye(3)
         Q = block_diag(Q_rz, Q_eps, Q_dr, Q_omega)
+        self.Q = block_diag(*[Q] * (self.N - 1))
 
-        self.Q = block_diag(*[Q] * self.N)
+        Q[0:3, 0:3] = np.diag(np.array([100, 100, 100]))
+        self.Q = block_diag(self.Q, Q)
 
         # Input weight matrix
         dqrWeight = np.array([1, 1, 1])
         Rdqr = np.diag(dqrWeight)
-        R = 1 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
+        R = 10 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
 
         self.R = block_diag(*[R] * self.M)
 
@@ -90,7 +92,7 @@ class StandUp(BaseRGCController):
         # Constraints
         # ----------------------------------------
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 35])
-        foot_u = np.array([0, 0, np.inf, np.inf, 150])
+        foot_u = np.array([0, 0, np.inf, np.inf, 75])
 
         # Stack for all 4 feet
         self.f_l = np.tile(foot_l.reshape(-1, 1), (4, 1))
@@ -166,7 +168,7 @@ class StandUp(BaseRGCController):
         self.Aa[0:26, 0:26] = np.identity(self.nx) + self.ts * self.A
         self.Aa[0:26, 26:] = self.ts * self.B
 
-        self.Ba[0:26, :] = self.ts * self.B
+        # self.Ba[0:26, :] = self.ts * self.B
 
         # dr, omega, q, r, eps, qr, g
         self.x = np.vstack(
@@ -188,18 +190,21 @@ class StandUp(BaseRGCController):
 
         _xy, _, A_hex, b_hex = self.cheby_center_solver.solve(self.contacts[:, :])
         self.Cch[self.i_com, 18:20] = A_hex
-        p_axis = np.sum(self.contacts[:,2])/4
-        z = float(self.rs.r_pos[2]-p_axis)
-        omega_0 = np.sqrt(9.81/ max(z, 1e-6))
-        self.Cch[self.i_xi, 0:2] = A_hex/omega_0
+        p_axis = np.sum(self.contacts[:, 2]) / 4
+        z = float(self.rs.r_pos[2] - p_axis)
+        omega_0 = np.sqrt(9.81 / max(z, 1e-6))
+        self.Cch[self.i_xi, 0:2] = A_hex / omega_0
         self.Cch[self.i_xi, 18:20] = A_hex
-        l = np.vstack((self.q_min.reshape(-1, 1), self.com_const.reshape(-1, 1), self.com_const.reshape(-1, 1), self.f_l.reshape(-1, 1)))
+
+        l = np.vstack((self.q_min.reshape(-1, 1), self.com_const.reshape(-1, 1), self.com_const.reshape(-1, 1),
+                       self.f_l.reshape(-1, 1)))
         u = np.vstack((self.q_max.reshape(-1, 1), b_hex.reshape(-1, 1), b_hex.reshape(-1, 1), self.f_u.reshape(-1, 1)))
+
         self.lch = np.tile(l, (self.N, 1))
         self.uch = np.tile(u, (self.N, 1))
-        if self.first_cont_interation:
-            self.ref.reshape(self.N, self.ny)[:, 0:2] = _xy.reshape(2,)
-            self.first_cont_interation = False
+        # if self.first_cont_interation:
+        #     self.ref.reshape(self.N, self.ny)[:, 0:2] = _xy.reshape(2,)
+        #     self.first_cont_interation = False
 
         Phi_cons[0:self.nch, :] = self.Cch @ self.Aa
         aux_cons = self.Cch @ self.Ba
@@ -210,14 +215,16 @@ class StandUp(BaseRGCController):
 
         if self.first_cont_interation:
             # update z ref
-            z = self.rs.r_pos[2]
-            rzRef = z + self.z_ref
-            ref = np.vstack((np.zeros((2, 1)), rzRef, np.zeros((4, 1)), np.zeros((3, 1)), np.zeros((3, 1))))
+            # z = np.sum(self.contacts[:, 2]) / 4
+            # rzRef = z + self.z_ref
+            r = self.contacts.sum(axis=0) / 4
+            r[2] += self.z_ref
+            ref = np.vstack((r.reshape(3, 1), np.zeros((4, 1)), np.zeros((3, 1)), np.zeros((3, 1))))
             self.ref = np.tile(ref, (self.N, 1))
 
         # keep the currently yaw
         yaw = self.rs.rpy[2]
         n, _ = plane_normal(self.contacts)
-        epsRef, _ = eps_reference(plane_normal=n, current_yaw=yaw, desired_yaw=None, current_epsilon=self.rs.epsilon)
+        epsRef, _ = eps_reference(current_yaw=yaw, current_epsilon=self.rs.epsilon)
         epsRef = epsRef.reshape(4,)
         self.ref.reshape(self.N, self.ny)[:, 3:7] = epsRef

@@ -48,3 +48,7 @@ class RGCState:
 
     prone_final_stage: bool = False
 
+    plane_normal: np.ndarray = field(default_factory=lambda: np.zeros(3))
+
+    xi : np.ndarray = field(default_factory=lambda: np.zeros(2))
+

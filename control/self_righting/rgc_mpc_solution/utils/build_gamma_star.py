@@ -206,7 +206,6 @@ CONFIGS = {
         "FL": REFERENCE,
         "RR": PIVOT,
         "RL": REFERENCE,
-
     },
     "swing_ccw": {
         "FR": REFERENCE,
@@ -219,5 +218,11 @@ CONFIGS = {
         "FL": FOOT,
         "RR": PIVOT,
         "RL": FOOT
+    },
+    "settle_ccw": {
+        "FR": FOOT,
+        "FL": PIVOT,
+        "RR": FOOT,
+        "RL": PIVOT
     },
 }

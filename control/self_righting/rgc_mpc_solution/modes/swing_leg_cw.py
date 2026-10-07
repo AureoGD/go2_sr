@@ -86,7 +86,7 @@ class SwingLegCW(BaseRGCController):
 
         Qeps = 0.05 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
         Q_pf = 5 * np.diag(np.array([1, 1, 1]))  # FL foot (P1)
-        Q_pr = 5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
+        Q_pr = 5.5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
         Q_q = np.diag(np.array([1]))
 
         Q = block_diag(Qeps, Q_q, Q_q, Q_pf, Q_pr)
@@ -107,7 +107,7 @@ class SwingLegCW(BaseRGCController):
 
         self.first_int = True
 
-        self.leg_path = SwingFootPlanner(N=self.N, dt=self.ts)
+        self.leg_path = SwingFootPlanner(N=self.N, dt=self.ts, R=0.35)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
 
@@ -123,7 +123,6 @@ class SwingLegCW(BaseRGCController):
         self.Cch[self.i_tau, 6:18] = -Kpe
         self.Cch[self.i_tau, self.nx:] = Kpe
 
-        # --- soft: RL normal contact force, priced not enforced ---
         self.ncs = 1
         self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
 
