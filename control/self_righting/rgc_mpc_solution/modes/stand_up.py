@@ -87,7 +87,8 @@ class StandUp(BaseRGCController):
 
         self.R = block_diag(*[R] * self.M)
 
-        self.R[self.M * self.nu:self.M - 1 * self.nu, self.M * self.nu - 1:self.M * self.nu] *= 10
+        self.R[(self.M - 1) * self.nu:self.M * self.nu, (self.M - 1) * self.nu:self.M * self.nu] *= 10
+
         # ----------------------------------------
         # Constraints
         # ----------------------------------------

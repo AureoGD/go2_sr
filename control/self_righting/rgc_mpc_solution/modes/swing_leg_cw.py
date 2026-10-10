@@ -86,7 +86,7 @@ class SwingLegCW(BaseRGCController):
 
         Qeps = 0.05 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
         Q_pf = 5 * np.diag(np.array([1, 1, 1]))  # FL foot (P1)
-        Q_pr = 5.5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
+        Q_pr = 7.5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
         Q_q = np.diag(np.array([1]))
 
         Q = block_diag(Qeps, Q_q, Q_q, Q_pf, Q_pr)
@@ -94,7 +94,7 @@ class SwingLegCW(BaseRGCController):
 
         # Update control action weight matrix
         R_p = 250 * np.diag(np.array([0.1, 1, 1]))  # original 1 1 1
-        R_s = 10 * np.diag(np.array([1, 1, 1]))
+        R_s = 5 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(R_p, R_s, R_p, R_s)
         self.R = block_diag(*[R] * self.M)
@@ -107,7 +107,7 @@ class SwingLegCW(BaseRGCController):
 
         self.first_int = True
 
-        self.leg_path = SwingFootPlanner(N=self.N, dt=self.ts, R=0.35)
+        self.leg_path = SwingFootPlanner(N=self.N, dt=self.ts, R=0.30)
 
         self.com_const = np.array([np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]).reshape(6, 1)
 
@@ -149,7 +149,8 @@ class SwingLegCW(BaseRGCController):
         Iinv = np.linalg.inv(I)
 
         k1 = (1 / self.total_mass) * self.Is @ self.Kp_mtx @ self.Jinv
-        k2 = (self.kd / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
+        # k2 = (self.kd / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
+        k2 = (1 / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
         k3 = Iinv @ -Sa.T @ self.Kp_mtx @ self.Jinv
         k4 = Iinv @ -Sa.T @ self.Kd_mtx @ self.Jinv
 

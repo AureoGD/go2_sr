@@ -116,7 +116,7 @@ class RollCW(BaseRGCController):
         self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
 
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 5])
-        foot_u = np.array([0, 0, np.inf, np.inf, 200])
+        foot_u = np.array([0, 0, np.inf, np.inf, 150])
 
         self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))
         self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))
@@ -191,13 +191,13 @@ class RollCW(BaseRGCController):
         aux_cons = np.zeros((self.nch, self.nu))
 
         r = self.x[18:21].reshape(3,)
-        omega_0, _, _, _= self.capture_point.update_geometry(self.contacts[3, :], self.contacts[0, :], r)
+        omega_0, _, _, _ = self.capture_point.update_geometry(self.contacts[3, :], self.contacts[0, :], r)
 
         A, bu, bl = support_polytope(self.contacts)
         self.Cch[self.i_com, 18:20] = A
 
         self.Cch[self.i_xi, 18:20] = A
-        self.Cch[self.i_xi, 0:2] = A/omega_0
+        self.Cch[self.i_xi, 0:2] = A / omega_0
 
         l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
         u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1)))

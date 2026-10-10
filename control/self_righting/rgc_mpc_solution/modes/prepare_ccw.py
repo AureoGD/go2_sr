@@ -6,7 +6,6 @@ from control.self_righting.rgc_mpc_solution.constraints.plane_colision import Pl
 from control.self_righting.rgc_mpc_solution.constraints.self_collision import self_collision_constraints
 
 
-
 class PrepareCCW(BaseRGCController):
 
     def __init__(self, robot_states, **kwargs):
@@ -33,8 +32,8 @@ class PrepareCCW(BaseRGCController):
         # Low-level mode controller gains
         # ----------------------------------------
 
-        self.Kp_vec = np.ones(12) * self.kp / 2
-        self.Kd_vec = np.ones(12) * self.kd / 10
+        self.Kp_vec = np.ones(12) * self.kp
+        self.Kd_vec = np.ones(12) * self.kd
 
         # ----------------------------------------
         # Matrices creation
@@ -68,7 +67,7 @@ class PrepareCCW(BaseRGCController):
 
         self.Cch[self.i_qr, 12:] = np.identity(12)
 
-        Ke = np.diag(self.Kp_vec)-np.diag(self.Kd_vec)@self.Lambda
+        Ke = np.diag(self.Kp_vec) - np.diag(self.Kd_vec) @ self.Lambda
         self.Cch[self.i_tau, :12] = -Ke
         self.Cch[self.i_tau, 12:] = Ke
 
@@ -84,16 +83,13 @@ class PrepareCCW(BaseRGCController):
         dqrWrr = np.diag(1 * np.array([1, 1, 1]))
         dqrWrl = np.diag(1 * np.array([1, 1, 1]))
 
-        R = 200 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
+        R = 150 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
         self.R = block_diag(*[R] * self.M)
 
         # ----------------------------------------
         # Reference
         # ----------------------------------------
-        qr = np.array([[0.00, 1.00, -2.60,
-                        1.05, 1.50, -2.30, 
-                        1.02, 4.15, -2.20,
-                        1.05, 1.50, -2.00]]).transpose()  
+        qr = np.array([[0.00, 1.00, -2.60, 1.05, 1.50, -2.00, 1.02, 4.15, -2.20, 1.05, 1.50, -2.00]]).transpose()
 
         self.ref = np.tile(qr, (self.N, 1))
 
@@ -118,7 +114,7 @@ class PrepareCCW(BaseRGCController):
         self.n_local = R_b_plane @ np.array([0.0, 0.0, 1.0])
 
         self.colision_cons = PlaneConstraint(self.n_local, self.p_offset_local, self.d_safe, np.zeros((3, 1)))
-        self.wcs_plane = 2.5
+        self.wcs_plane = 5
 
         self.wcs_grf = 2
 
@@ -166,7 +162,7 @@ class PrepareCCW(BaseRGCController):
         p_k0 = self.pin_engine.frame_pos('RR', 'calf')
         Jk = self.pin_engine.linear_leg_jacobian('RR', 'calf')
         g = n_w @ Jk
-        Ccs[6, 9:12] = g
+        Ccs[6, 6:9] = g
         knee_lower = lb - n_w @ p_k0 + g @ self.x[6:9]
 
         f_cte_l = np.array([-np.inf, -np.inf])

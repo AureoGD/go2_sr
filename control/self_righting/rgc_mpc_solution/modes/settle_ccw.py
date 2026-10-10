@@ -31,7 +31,7 @@ class SettleCCW(BaseRGCController):
 
         self.nx = 26  # CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
         self.nu = 12  # delta qr (12, 1)
-        self.ny = 7  # joint pos (12, 1), body orientation (4, 1)
+        self.ny = 9  # joint pos (12, 1), body orientation (4, 1)
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -66,6 +66,8 @@ class SettleCCW(BaseRGCController):
         self.Cy[1:5, 21:25] = np.eye(4)
         self.Cy[5, 10] = 1  # FL
         self.Cy[6, 16] = 1  # RL
+        self.Cy[7, 17] = 1
+        self.Cy[8, 11] = 1
 
         # Constraints
         self.i_qr = slice(0, 12)
@@ -82,29 +84,29 @@ class SettleCCW(BaseRGCController):
         # ----------------------------------------
         # Weights
         # ----------------------------------------
-        Qeps = 1 * np.diag(np.array([1, 1, 1, 1]))
-        Qq = 0.01 * np.diag(np.array([1, 1]))
-        Qz = 1.25 * np.diag(np.array([1]))
+        Qeps = 1.75 * np.diag(np.array([1, 1, 1, 1]))
+        Qq = 0.2 * np.diag(np.array([1, 1, 1, 1]))
+        Qz = 0.75 * np.diag(np.array([1]))
 
-        Q = block_diag(Qz, Qq, Qeps)
+        Q = block_diag(Qz, Qeps, Qq)
         self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rp = np.diag(np.array([1, 40, 40]))
+        Rp = np.diag(np.array([1, 20, 20]))
         Rs = np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rs, Rp, Rs, Rp)
         self.R = block_diag(*[R] * self.M)
 
-        self.R[self.M * self.nu:self.M - 1 * self.nu, self.M * self.nu - 1:self.M * self.nu] *= 10
+        self.R[(self.M - 1) * self.nu:self.M * self.nu, (self.M - 1) * self.nu:self.M * self.nu] *= 10
 
         # ----------------------------------------
         # Constraints
         # ----------------------------------------
-        foot_l1 = np.array([-np.inf, -np.inf, 0, 0, 20])
+        foot_l1 = np.array([-np.inf, -np.inf, 0, 0, 30])
         foot_u1 = np.array([0, 0, np.inf, np.inf, 75])
 
-        foot_l2 = np.array([-np.inf, -np.inf, -np.inf, -np.inf, 15])
+        foot_l2 = np.array([-np.inf, -np.inf, -np.inf, -np.inf, 30])
         foot_u2 = np.array([np.inf, np.inf, np.inf, np.inf, 75])
 
         self.f_l = np.vstack(
@@ -192,7 +194,8 @@ class SettleCCW(BaseRGCController):
         p_axis = np.sum(self.contacts[:, 2]) / 4
         z = float(self.rs.r_pos[2] - p_axis)
         omega_0 = np.sqrt(9.81 / max(z, 1e-6))
-        self.Cch[self.i_xi, 0:2] = A @ self.A[15:17, 0:2] / omega_0
+        # self.Cch[self.i_xi, 0:2] = A @ self.A[15:17, 0:2] / omega_0
+        self.Cch[self.i_xi, 0:2] = A / omega_0
         self.Cch[self.i_xi, 18:20] = A
 
         l = np.vstack((self.q_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
@@ -228,6 +231,7 @@ class SettleCCW(BaseRGCController):
             n, _ = plane_normal(self.contacts)
             self.task_state.plane_normal = n
             epsRef, _ = eps_reference(current_yaw=yaw, plane_normal=n, current_epsilon=self.rs.epsilon)
-            ref = np.vstack((np.array([0]), epsRef.reshape(-1, 1), np.array([2.6]), np.array([2.6])))
+            ref = np.vstack((np.array([0]), epsRef.reshape(-1, 1), np.array([2.6]), np.array([2.6]), np.array([-2.6]),
+                             np.array([-2.6])))
 
             self.ref = np.tile(ref, (self.N, 1))

@@ -29,8 +29,8 @@ class ProneCCW(BaseRGCController):
         # Low-level mode controller gains
         # ----------------------------------------
 
-        self.Kp_vec = np.ones(12) * self.kp * 0.5
-        self.Kd_vec = np.ones(12) * self.kd * 0.5
+        self.Kp_vec = np.ones(12) * self.kp
+        self.Kd_vec = np.ones(12) * self.kd
 
         # Dynamic matrices
         self.A = np.zeros((self.nx, self.nx), dtype=np.float32)
@@ -69,7 +69,7 @@ class ProneCCW(BaseRGCController):
         # Weights
         # ----------------------------------------
 
-        Qq = 1 * np.eye(12)
+        Qq = 1.25 * np.eye(12)
         self.Q = block_diag(*[Qq] * self.N)
 
         # Update control action weight matrix
@@ -79,7 +79,7 @@ class ProneCCW(BaseRGCController):
         Rdqrl = 100 * np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rdqfr, Rdqfl, Rdqrr, Rdqrl)
-        self.R = block_diag(*[R] * self.M)
+        self.R = 0.75 * block_diag(*[R] * self.M)
 
         # ----------------------------------------
         # Reference

@@ -30,8 +30,8 @@ class GoSafe(BaseRGCController):
         # Low-level mode controller gains
         # ----------------------------------------
 
-        self.Kp_vec = np.ones(12) * self.kp / 2
-        self.Kd_vec = np.ones(12) * self.kd / 10
+        self.Kp_vec = np.ones(12) * self.kp
+        self.Kd_vec = np.ones(12) * self.kd
 
         # ----------------------------------------
         # Matrices creation
