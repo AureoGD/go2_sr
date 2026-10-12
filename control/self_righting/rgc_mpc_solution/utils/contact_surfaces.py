@@ -15,11 +15,11 @@ def contact_surfaces(c1, c2, c3, ref=np.array([1.0, 0.0, 0.0])):
 
     t1 = ref - np.dot(ref, n) * n
     t1_norm = np.linalg.norm(t1)
-    if t1_norm < 1e-10:          # only if the surface is vertical and ref ⊥ it
+    if t1_norm < 1e-10: 
         t1 = np.cross(np.array([0.0, 0.0, 1.0]), n)
         t1 /= np.linalg.norm(t1)
     else:
         t1 = t1 / t1_norm
 
-    t2 = np.cross(n, t1)         # already unit: n ⊥ t1, both unit
+    t2 = np.cross(n, t1)    
     return n, t1, t2

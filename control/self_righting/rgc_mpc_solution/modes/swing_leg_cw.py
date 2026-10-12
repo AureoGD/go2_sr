@@ -133,7 +133,7 @@ class SwingLegCW(BaseRGCController):
     def update_model(self):
 
         x, y, z, w = self.rs.epsilon
-        T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
+        T = 0.5 * np.array([[w, -z, y], [z, w, -x], [-y, x, w], [-x, -y, -z]])
 
         self.contacts[0, :] = self.pin_engine.frame_pos("FR", "foot")
         self.contacts[1, :] = self.pin_engine.frame_pos('FR', 'thigh')

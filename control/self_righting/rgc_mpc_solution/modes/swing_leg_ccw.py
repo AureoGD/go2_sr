@@ -131,8 +131,9 @@ class SwingLegCCW(BaseRGCController):
 
     def update_model(self):
 
-        x, y, z, w = self.rs.epsilon
-        T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
+        x, y, z, w = self.rs.epsilon.copy()
+
+        T = 0.5 * np.array([[w, -z, y], [z, w, -x], [-y, x, w], [-x, -y, -z]])
 
         self.contacts[0, :] = self.pin_engine.frame_pos("FL", "foot")
         self.contacts[1, :] = self.pin_engine.frame_pos('FL', 'thigh')
@@ -148,7 +149,6 @@ class SwingLegCCW(BaseRGCController):
         Iinv = np.linalg.inv(I)
 
         k1 = (1 / self.total_mass) * self.Is @ self.Kp_mtx @ self.Jinv
-        # k2 = (self.kd / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
         k2 = (1 / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
         k3 = Iinv @ -Sa.T @ self.Kp_mtx @ self.Jinv
         k4 = Iinv @ -Sa.T @ self.Kd_mtx @ self.Jinv

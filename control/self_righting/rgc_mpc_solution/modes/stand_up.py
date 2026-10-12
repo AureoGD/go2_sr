@@ -23,6 +23,9 @@ class StandUp(BaseRGCController):
         self.M = 20
         self.ts = 0.01
 
+        self.kp*=1.2
+        self.kd*=1.2
+
         # Number of states, inputs, outputs and constarints
 
         self.nx = 26  # CoM lin vel (3, 1), CoM ang vel (3, 1), joint pos. (12, 1), CoM pos (3, 1), epsilon (4, 1), gravity (1, 1)
@@ -70,19 +73,20 @@ class StandUp(BaseRGCController):
         self.gamma_builder = GammaBuilder(self.pin_engine, CONFIGS["stand_up"], self.Kp_vec, self.Kd_vec, 2)
 
         # Output weight matrix
-        Q_rz = np.diag(np.array([15, 15, 20]))
-        Q_eps = 1.5 * np.diag(np.array([1, 1, 1, 1]))
-        Q_dr = 0.1 * np.eye(3)
-        Q_omega = 0.1 * np.eye(3)
+        Q_rz = np.diag(np.array([1, 1, 100]))
+        Q_eps = 1 * np.diag(np.array([1, 1, 1, 1]))
+        Q_dr = 0.5 * np.eye(3)
+        Q_omega = 0.5 * np.eye(3)
         Q = block_diag(Q_rz, Q_eps, Q_dr, Q_omega)
         self.Q = block_diag(*[Q] * (self.N - 1))
 
-        Q[0:3, 0:3] = np.diag(np.array([100, 100, 100]))
+        Q[0:3, 0:3] = np.diag(np.array([0.1, 0.1, 10]))
         self.Q = block_diag(self.Q, Q)
 
         # Input weight matrix
         dqrWeight = np.array([1, 1, 1])
         Rdqr = np.diag(dqrWeight)
+        # R = 50 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
         R = 10 * block_diag(Rdqr, Rdqr, Rdqr, Rdqr)
 
         self.R = block_diag(*[R] * self.M)
@@ -93,7 +97,7 @@ class StandUp(BaseRGCController):
         # Constraints
         # ----------------------------------------
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 35])
-        foot_u = np.array([0, 0, np.inf, np.inf, 75])
+        foot_u = np.array([0, 0, np.inf, np.inf, 100])
 
         # Stack for all 4 feet
         self.f_l = np.tile(foot_l.reshape(-1, 1), (4, 1))
@@ -118,6 +122,8 @@ class StandUp(BaseRGCController):
 
         self.first_cont_interation = True
 
+        self.terminal = False
+
         # ----------------------------------------
         # Low-level mode controller gains
         # ----------------------------------------
@@ -129,9 +135,9 @@ class StandUp(BaseRGCController):
 
         r = self.rs.r_pos
 
-        x, y, z, w = self.rs.epsilon
+        x, y, z, w = self.rs.epsilon.copy()
 
-        T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
+        T = 0.5 * np.array([[w, -z, y], [z, w, -x], [-y, x, w], [-x, -y, -z]])
 
         I = self.pin_engine.centroidal_inertia()
         Iinv = np.linalg.inv(I)
@@ -169,8 +175,6 @@ class StandUp(BaseRGCController):
         self.Aa[0:26, 0:26] = np.identity(self.nx) + self.ts * self.A
         self.Aa[0:26, 26:] = self.ts * self.B
 
-        # self.Ba[0:26, :] = self.ts * self.B
-
         # dr, omega, q, r, eps, qr, g
         self.x = np.vstack(
             (self.rs.r_vel.reshape(-1, 1), self.rs.omega.reshape(-1, 1), self.rs.q.reshape(-1, 1),
@@ -203,6 +207,7 @@ class StandUp(BaseRGCController):
 
         self.lch = np.tile(l, (self.N, 1))
         self.uch = np.tile(u, (self.N, 1))
+
         # if self.first_cont_interation:
         #     self.ref.reshape(self.N, self.ny)[:, 0:2] = _xy.reshape(2,)
         #     self.first_cont_interation = False
@@ -214,18 +219,18 @@ class StandUp(BaseRGCController):
 
     def build_reference(self):
 
+        yaw = self.rs.rpy[2]
+        epsRef, _ = eps_reference(current_yaw=yaw, current_epsilon=self.rs.epsilon)
+        epsRef = epsRef.reshape(4,)
+        r = self.contacts.sum(axis=0) / 4
         if self.first_cont_interation:
-            # update z ref
-            # z = np.sum(self.contacts[:, 2]) / 4
-            # rzRef = z + self.z_ref
-            r = self.contacts.sum(axis=0) / 4
+            # r = self.rs.r_pos
             r[2] += self.z_ref
             ref = np.vstack((r.reshape(3, 1), np.zeros((4, 1)), np.zeros((3, 1)), np.zeros((3, 1))))
             self.ref = np.tile(ref, (self.N, 1))
+            # self.lterm = -np.inf*np.ones((self.ny,1))
+            # self.uterm = np.inf*np.ones((self.ny,1))
+            self.first_cont_interation = False
 
-        # keep the currently yaw
-        yaw = self.rs.rpy[2]
-        n, _ = plane_normal(self.contacts)
-        epsRef, _ = eps_reference(current_yaw=yaw, current_epsilon=self.rs.epsilon)
-        epsRef = epsRef.reshape(4,)
-        self.ref.reshape(self.N, self.ny)[:, 3:7] = epsRef
+        self.ref.reshape(self.N, self.ny)[:, 0:2] = r[0:2]
+        self.ref.reshape(self.N, self.ny)[:, 3:7] = epsRef  

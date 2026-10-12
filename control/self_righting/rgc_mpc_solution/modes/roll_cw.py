@@ -116,7 +116,7 @@ class RollCW(BaseRGCController):
         self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
 
         foot_l = np.array([-np.inf, -np.inf, 0, 0, 5])
-        foot_u = np.array([0, 0, np.inf, np.inf, 150])
+        foot_u = np.array([0, 0, np.inf, np.inf, 200])
 
         self.f_l = np.tile(foot_l.reshape(-1, 1), (1, 1))
         self.f_u = np.tile(foot_u.reshape(-1, 1), (1, 1))
@@ -136,7 +136,7 @@ class RollCW(BaseRGCController):
     def update_model(self):
         x, y, z, w = self.rs.epsilon
 
-        T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
+        T = 0.5 * np.array([[w, -z, y], [z, w, -x], [-y, x, w], [-x, -y, -z]])
 
         self.contacts[0, :] = self.pin_engine.frame_pos("RR", "thigh")
         self.contacts[1, :] = self.pin_engine.frame_pos("RR", "foot")

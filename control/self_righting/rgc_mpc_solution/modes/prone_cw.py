@@ -85,7 +85,7 @@ class ProneCW(BaseRGCController):
         # Reference
         # ----------------------------------------
         self.qr1 = np.array([[-0.5, 1.4, -2.7, 0.5, 1.4, -2.7, -0.5, 1.4, -2.7, 0.5, 1.4, -2.7]]).transpose()
-        self.qr2 = np.array([[0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7]]).transpose()
+        self.qr2 = np.array([[0.0, 1.30, -2.7, 0.0, 1.30, -2.7, 0.0, 1.30, -2.7, 0.0, 1.30, -2.7]]).transpose()
 
         self.first_int = True
 

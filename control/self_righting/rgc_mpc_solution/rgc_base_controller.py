@@ -97,6 +97,13 @@ class BaseRGCController(ABC):
         self.wcs = None
         self.eps_soft_reg = 1e-6
 
+        self.terminal = False
+        self.lterm = None
+        self.uterm = None
+
+        self.Phi_term = None
+        self.G_term = None
+
         # Robot constants
 
         self.leg_names = ["FR", "FL", "RR", "RL"]
@@ -210,6 +217,10 @@ class BaseRGCController(ABC):
 
                 j += 1
 
+        if self.terminal:
+            self.G_term = self.G_y[-self.ny:, :]
+            self.Phi_term = self.Phi_y[-self.ny:, :]
+
     def build_cost_function(self):
 
         H_dense = self.G_y.T @ self.Q @ self.G_y + self.R
@@ -248,6 +259,11 @@ class BaseRGCController(ABC):
             G_blocks.append(self.G_cu)
             l_blocks.append(self.lcu - self.Phi_cu @ self.x)
             u_blocks.append(self.ucu - self.Phi_cu @ self.x)
+
+        if self.G_term is not None:
+            G_blocks.append(self.G_term)
+            l_blocks.append(self.lterm - self.Phi_term @ self.x)
+            u_blocks.append(self.uterm - self.Phi_term @ self.x)
 
         G = np.vstack(G_blocks)
         l = np.vstack(l_blocks)

@@ -136,7 +136,7 @@ class SettleCW(BaseRGCController):
 
         x, y, z, w = self.rs.epsilon
 
-        T = 0.5 * np.array([[w, z, -y], [-z, w, x], [y, -x, w], [-x, -y, -z]])
+        T = 0.5 * np.array([[w, -z, y], [z, w, -x], [-y, x, w], [-x, -y, -z]])
 
         I = self.pin_engine.centroidal_inertia()
         Iinv = np.linalg.inv(I)
