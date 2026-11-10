@@ -22,7 +22,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out",
                         type=str,
-                        default="class_validation",
+                        default="class_validation_test",
                         help="output name (saved to evaluation/results/<out>.npz)")
     args = parser.parse_args()
 
@@ -50,12 +50,12 @@ def main():
     # dqe, dq = [], []
     dqe, dq = [], []
     sim.reset_robot_pose(b0=b0, r0=r0, q0=q0)
-    for tick in range(150):
-        action = 0 if tick < 100 else 2
+    for tick in range(250):
+        action = 0 if tick < 50 else (2 if tick < 150 else 1)
         sim.simulation_loop(action)
 
-        dq.append(np.asarray(sim.dg.dq, np.float64).ravel())
-        dqe.append(np.asarray(sim.dg.dqe, np.float64).ravel())
+        # dq.append(np.asarray(sim.dg.dq, np.float64).ravel())
+        # dqe.append(np.asarray(sim.dg.dqe, np.float64).ravel())
 
     out = Path("evaluation/results") / f"{args.out}.npz"
     out.parent.mkdir(parents=True, exist_ok=True)

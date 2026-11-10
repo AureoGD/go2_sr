@@ -1,6 +1,7 @@
 import json
 import numpy as np
 from pathlib import Path
+import time
 
 from scripts.sim_tsm import SimTSM
 from scripts.sim_fsm import SimFSM
@@ -8,13 +9,14 @@ from scripts.sim_default import SimDef
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-IC_FILE = SCRIPT_DIR / "ics" / "ics_v1.json"
-OUTPUT = SCRIPT_DIR / "controller_data" / "unitree_validation_data.npz"
+IC_FILE = SCRIPT_DIR / "ics" / "ics_v2.json"
+OUTPUT = SCRIPT_DIR / "controller_data" / "tsm_validation_data.npz"
 
-N_SLOP = 6
+N_SLOP = 5
 SLOP_ANG_INC = 5
 SLOP_LENGTH = 3
 SLOP_WIDTH = 3
+Z_OFF = [0.35, 0.35, 0.3, 0.3, 0.2]
 
 # -----------------------------------------------------------------------------
 # Load initial conditions
@@ -40,23 +42,20 @@ success = np.zeros((N_SLOP, n_bins, n_per_bin), dtype=bool)
 # Select controller
 # -----------------------------------------------------------------------------
 
-# sim = SimFSM()
-# sim = SimTSM()
-sim = SimDef()
+# sim = SimFSM(log=False)
+sim = SimTSM()
+# sim = SimDef()
 
 # -----------------------------------------------------------------------------
 # Run experiments
 # -----------------------------------------------------------------------------
-
 for i_slope in range(N_SLOP):
-
+    # i_slope = 4
     slope_angle = i_slope * SLOP_ANG_INC
 
     z = -0.05 + SLOP_WIDTH * np.sin(np.deg2rad(slope_angle)) / 2
-    b0 = [0, SLOP_LENGTH * i_slope, 0.3 + z]
-
+    b0 = [0, SLOP_LENGTH * i_slope, Z_OFF[i_slope] + z]
     for ic in ics:
-
         yaw = ic["yaw"]
         q0 = ic["q0"]
 
@@ -69,6 +68,8 @@ for i_slope in range(N_SLOP):
         )
 
         accomplish, _, _ = sim.run_sim()
+
+        print(f"Success: {accomplish}, ic: {ic['ic_id']}")
 
         success[
             i_slope,

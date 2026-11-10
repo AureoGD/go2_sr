@@ -80,10 +80,10 @@ class PrepareCCW(BaseRGCController):
 
         dqrWfr = np.diag(1 * np.array([1, 1, 1]))
         dqrWfl = np.diag(1 * np.array([1, 1, 1]))
-        dqrWrr = np.diag(1 * np.array([1, 1, 1]))
+        dqrWrr = np.diag(1 * np.array([0.001, 1, 1]))
         dqrWrl = np.diag(1 * np.array([1, 1, 1]))
 
-        R = 150 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
+        R = 100 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
         self.R = block_diag(*[R] * self.M)
 
         # ----------------------------------------

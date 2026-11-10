@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 
 from control.self_righting.rgc_mpc_solution.utils.suppress_output import suppress_output
 
-NCS_MAX = 20
+NCS_MAX = 50
 
 
 class BaseRGCController(ABC):
@@ -70,6 +70,9 @@ class BaseRGCController(ABC):
 
         # Solver
         self.prob = osqp.OSQP()
+
+        self.eps_abs=1e-4
+        self.eps_rel=1e-4
 
         self.Phi_y = None
         self.G_y = None
@@ -305,9 +308,12 @@ class BaseRGCController(ABC):
                         l=self.lc,
                         u=self.uc,
                         verbose=False,
-                        warm_start=True,
-                        max_iter=2000,
-                        check_termination=10)
+                        warm_starting=False,
+                        max_iter=5000,
+                        eps_abs=self.eps_abs,
+                        eps_rel=self.eps_rel,
+                        check_termination=10,
+                    )
 
     def solve_qp(self):
         return self.prob.solve()
@@ -319,19 +325,32 @@ class BaseRGCController(ABC):
         else:
             self.task_state.lambda_max = 0.0
 
-        per_row = np.full(NCS_MAX, np.nan)
-        if self.ncs is not None and res.x is not None:
-            eps = res.x[self.nu * self.M:].reshape(self.N, self.ncs)
-            self.task_state.slack_max = np.max(eps)
-            per_row[0:self.ncs] = np.max(eps, axis=0)
+        if res.x is not None:
+            # Hard-constraint violations: only the MPC input variables
+            n_u = self.nu * self.M
+            self.eval_hc_violation(res.x[:n_u])
+
+            # Soft-constraint slack diagnostics
+            if self.ncs is not None:
+                self.eval_sc_slack(res.x)
+            else:
+                self.task_state.slack_max = 0.0
+                self.task_state.slack_max_per_row = np.full(
+                    NCS_MAX, np.nan
+                )
         else:
+            # No solution available: do not retain stale diagnostics
             self.task_state.slack_max = 0.0
-        self.task_state.slack_max_per_row = per_row
+            self.task_state.slack_max_per_row = np.full(
+                NCS_MAX, np.nan
+            )
+
+            # Mark hard-constraint diagnostics as unavailable
+            if self.nch is not None:
+                self.task_state.constraint_violation[:self.nch] = np.nan
 
         self.task_state.primal_res = res.info.prim_res
-
         self.task_state.dual_res = res.info.dual_res
-
         self.task_state.solver_status = res.info.status_val
 
     def validate_state(self):
@@ -391,21 +410,21 @@ class BaseRGCController(ABC):
             return False
         return True
 
-    # def validate_solver_solution(self, res):
+    def eval_hc_violation(self, x):
+        # Evaluate the hard-constraint expression over the prediction horizon
+        z = self.G_ch @ x - self.Phi_ch @ self.x
 
-    #     if res is None:
-    #         return False
+        # Elementwise violation: zero if satisfied, positive otherwise
+        v = np.maximum(
+            np.maximum(self.lch - z, z - self.ch),
+            0.0,
+        )
 
-    #     if res.x is None:
-    #         return False
+        # Maximum violation for each constraint over the prediction horizon
+        V = np.max(v.reshape(self.nch, self.N), axis=1)
 
-    #     if res.info.status != "solved":
-    #         return False
-
-    #     if not np.isfinite(res.x).all():
-    #         return False
-
-    #     return True
+        # Store raw physical violations in RGCState
+        self.task_state.constraint_violation[:self.nch] = V
 
     def skew_symmetric_matrix(self, vector):
         v1, v2, v3 = vector
@@ -434,3 +453,34 @@ class BaseRGCController(ABC):
     @abstractmethod
     def build_reference(self):
         pass
+
+
+    def eval_hc_violation(self, U):
+
+        z = self.G_ch @ U.reshape(self.nu*self.N,1) + self.Phi_ch @ self.x
+
+        v = np.maximum(
+            np.maximum(self.lch - z, z - self.uch),
+            0.0,
+        )
+
+        # Rows: constraints; columns: prediction instants
+        V_horizon = v.reshape(self.N, self.nch).T
+
+        # Maximum violation per constraint over the horizon
+        V = V_horizon.max(axis=1)
+
+        self.task_state.constraint_violation[:self.nch] = V
+
+
+    def eval_sc_slack(self, x):
+
+        eps = x[self.nu * self.M:].reshape(self.N, self.ncs)
+
+        V = np.max(eps, axis=0)
+
+        per_row = np.full(NCS_MAX, np.nan)
+        per_row[:self.ncs] = V
+
+        self.task_state.slack_max_per_row = per_row
+        self.task_state.slack_max = np.max(V)

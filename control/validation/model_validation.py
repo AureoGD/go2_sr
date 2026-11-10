@@ -74,7 +74,7 @@ class ModelValidation(BaseSelfRighting):
             J_com = self.pin_engine.com_jacobian()
             r = rs.r_pos.flatten()
 
-            gl, ga, ge, Jc = self.gamma_builder.build(r, use_gamma_e=True)
+            gl, ga, ge, _, _ = self.gamma_builder.build(r, use_gamma_e=True)
             dg.dqe = gl @ dr - ga @ omega + 0 * ge @ (cs.qr - rs.q)
 
             dg.dr = dr

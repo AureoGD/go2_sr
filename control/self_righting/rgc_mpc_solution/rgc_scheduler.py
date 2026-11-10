@@ -8,7 +8,7 @@ from control.self_righting.rgc_mpc_solution.modes.prepare_cw import PrepareCW
 from control.self_righting.rgc_mpc_solution.modes.prepare_ccw import PrepareCCW
 from control.self_righting.rgc_mpc_solution.modes.roll_cw import RollCW
 from control.self_righting.rgc_mpc_solution.modes.roll_ccw import RollCCW
-from control.self_righting.rgc_mpc_solution.modes.swing_leg_cw import SwingLegCW
+from control.self_righting.rgc_mpc_solution.modes.swing_leg_cw_copy import SwingLegCW
 from control.self_righting.rgc_mpc_solution.modes.swing_leg_ccw import SwingLegCCW
 from control.self_righting.rgc_mpc_solution.modes.settle_cw import SettleCW
 from control.self_righting.rgc_mpc_solution.modes.settle_ccw import SettleCCW

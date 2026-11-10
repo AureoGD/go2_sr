@@ -187,6 +187,11 @@ class Go2Sim:
                 f_world = -f_world
             self.rs.force_mj[idx] += f_world
 
+        self.rs.foot_contacts[0, :] = self.pin_engine.frame_pos('FR', 'foot')
+        self.rs.foot_contacts[1, :] = self.pin_engine.frame_pos('FL', 'foot')
+        self.rs.foot_contacts[2, :] = self.pin_engine.frame_pos('RR', 'foot')
+        self.rs.foot_contacts[3, :] = self.pin_engine.frame_pos('RL', 'foot')
+
     # ======================================================
     # LOW-LEVEL CONTROL (PD + gravity)
     # ======================================================

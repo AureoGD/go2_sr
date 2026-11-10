@@ -82,7 +82,7 @@ class GoSafe(BaseRGCController):
         dqrWrr = np.diag(1 * np.array([1, 1, 1]))
         dqrWrl = np.diag(1 * np.array([1, 1, 1]))
 
-        R = 100 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
+        R = 50 * block_diag(dqrWfr, dqrWfl, dqrWrr, dqrWrl)
         self.R = block_diag(*[R] * self.M)
 
         # ----------------------------------------

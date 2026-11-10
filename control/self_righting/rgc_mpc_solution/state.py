@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 import numpy as np
 
-NCS_MAX = 8
+CONSTRAINTS_MAX = 50
+NCS_MAX = 50
 
 
 @dataclass
@@ -34,6 +35,9 @@ class RGCState:
 
     solver_status: float = 0.0
 
+
+    constraint_violation: np.ndarray = field(default_factory=lambda: np.full(CONSTRAINTS_MAX, np.nan)
+)
     # ---------------------------------
     # MPC status
     # ---------------------------------

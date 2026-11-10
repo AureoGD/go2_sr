@@ -10,6 +10,7 @@ from control.self_righting.rgc_mpc_solution.utils.epsilon_reference import eps_r
 from control.self_righting.rgc_mpc_solution.utils.geometry import plane_normal
 from control.self_righting.rgc_mpc_solution.utils.build_gamma_star import GammaBuilder, CONFIGS
 
+from scipy.spatial.transform import Rotation as R
 
 class StandUp(BaseRGCController):
 
@@ -23,8 +24,8 @@ class StandUp(BaseRGCController):
         self.M = 20
         self.ts = 0.01
 
-        self.kp*=1.2
-        self.kd*=1.2
+        # self.kp*=1
+        # self.kd*=1
 
         # Number of states, inputs, outputs and constarints
 
@@ -96,7 +97,7 @@ class StandUp(BaseRGCController):
         # ----------------------------------------
         # Constraints
         # ----------------------------------------
-        foot_l = np.array([-np.inf, -np.inf, 0, 0, 35])
+        foot_l = np.array([-np.inf, -np.inf, 0, 0, 30])
         foot_u = np.array([0, 0, np.inf, np.inf, 100])
 
         # Stack for all 4 feet
@@ -130,6 +131,9 @@ class StandUp(BaseRGCController):
 
         self.Kp_vec = np.ones(12) * self.kp
         self.Kd_vec = np.ones(12) * self.kd
+
+        self.eps_abs=1e-3
+        self.eps_rel=1e-3
 
     def update_model(self):
 
@@ -188,8 +192,9 @@ class StandUp(BaseRGCController):
 
         Phi_cons = np.zeros((self.nch * self.N, self.nx + self.nu))
         aux_cons = np.zeros((self.nch, self.nu))
-
-        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts, 0.7 / np.sqrt(2))
+        r, p, y = self.rs.rpy
+        rb = R.from_euler("xyz", [r, p, y], degrees=False).as_matrix()
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts, 0.8 / np.sqrt(2), R=rb[:,0])
 
         self.Cch[self.i_grf, :] = -pyramid_fric_matrix @ self.Jinv @ self.L
 
@@ -224,13 +229,11 @@ class StandUp(BaseRGCController):
         epsRef = epsRef.reshape(4,)
         r = self.contacts.sum(axis=0) / 4
         if self.first_cont_interation:
-            # r = self.rs.r_pos
             r[2] += self.z_ref
             ref = np.vstack((r.reshape(3, 1), np.zeros((4, 1)), np.zeros((3, 1)), np.zeros((3, 1))))
             self.ref = np.tile(ref, (self.N, 1))
-            # self.lterm = -np.inf*np.ones((self.ny,1))
-            # self.uterm = np.inf*np.ones((self.ny,1))
             self.first_cont_interation = False
 
         self.ref.reshape(self.N, self.ny)[:, 0:2] = r[0:2]
         self.ref.reshape(self.N, self.ny)[:, 3:7] = epsRef  
+

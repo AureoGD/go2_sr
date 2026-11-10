@@ -64,7 +64,7 @@ class SimDef():
     def task_success(self):
         flag_succes = False
 
-        if bool(np.all(self.sim.robot_state.foot_touching) == 1):
+        if bool(np.all(self.sim.rs.foot_touching) == 1):
             flag_succes = True
 
         return flag_succes

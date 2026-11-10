@@ -30,9 +30,9 @@ class SwingLegCW(BaseRGCController):
         # Constraints slices
         self.i_qr = slice(0, 12)
         self.i_tau = slice(self.i_qr.stop, self.i_qr.stop + 12)
-        self.i_com = slice(self.i_tau.stop, self.i_tau.stop + 4)
-        self.i_xi = slice(self.i_com.stop, self.i_com.stop + 4)
-        self.nch = self.i_xi.stop
+        # self.i_com = slice(self.i_tau.stop, self.i_tau.stop + 4)
+        # self.i_xi = slice(self.i_com.stop, self.i_com.stop + 4)
+        self.nch = self.i_tau.stop
 
         # ----------------------------------------
         # Low-level mode controller gains
@@ -85,9 +85,9 @@ class SwingLegCW(BaseRGCController):
         # ----------------------------------------
 
         Qeps = 0.05 * np.diag(np.array([1, 1, 1, 1]))  # Quaternions
-        Q_pf = 5 * np.diag(np.array([1, 1, 1]))  # FL foot (P1)
-        Q_pr = 7.5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
-        Q_q = np.diag(np.array([1]))
+        Q_pf = 1.5 * np.diag(np.array([1, 1, 1]))  # FL foot (P1)
+        Q_pr = 1.5 * np.diag(np.array([1, 1, 1]))  # RL foot (P2)
+        Q_q = np.diag(np.array([0.5]))
 
         Q = block_diag(Qeps, Q_q, Q_q, Q_pf, Q_pr)
         self.Q = block_diag(*[Q] * self.N)
@@ -123,13 +123,28 @@ class SwingLegCW(BaseRGCController):
         self.Cch[self.i_tau, 6:18] = -Kpe
         self.Cch[self.i_tau, self.nx:] = Kpe
 
-        self.ncs = 1
+        self.ncs = 9
         self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
 
-        self.wcs = 10 * np.ones(self.ncs * self.N)
+        w_cp = np.array([10])
+        w_comp = np.array([0.1, 0.1, 0.1, 0.1])
+        w_cpp = np.array([0.1, 0.1, 0.1, 0.1])
+        wcs = np.vstack((w_cp.reshape(-1, 1), w_comp.reshape(-1, 1), w_cpp.reshape(-1, 1)))
+
+        self.wcs = np.tile(wcs, (self.N, 1))
 
         self.Is = np.concatenate((np.identity(3), np.zeros((3, 3)), np.identity(3), np.zeros((3, 3))), axis=1)
 
+        self.crossed_once = False
+
+        # ----------------------------------------
+        # Optimization problem constants
+        # ----------------------------------------
+        self.inter = 0
+
+        self.eps_abs=1e-4
+        self.eps_rel=1e-4
+        
     def update_model(self):
 
         x, y, z, w = self.rs.epsilon
@@ -149,7 +164,6 @@ class SwingLegCW(BaseRGCController):
         Iinv = np.linalg.inv(I)
 
         k1 = (1 / self.total_mass) * self.Is @ self.Kp_mtx @ self.Jinv
-        # k2 = (self.kd / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
         k2 = (1 / self.total_mass) * self.Is @ self.Kd_mtx @ self.Jinv
         k3 = Iinv @ -Sa.T @ self.Kp_mtx @ self.Jinv
         k4 = Iinv @ -Sa.T @ self.Kd_mtx @ self.Jinv
@@ -199,17 +213,8 @@ class SwingLegCW(BaseRGCController):
         self.Cch[self.i_tau, 3:6] = self.Kd_mtx @ ga
 
     def build_hard_constraint_matrices(self):
-        r = self.x[18:21].reshape(3,)
-        omega_0, _, _, _ = self.capture_point.update_geometry(self.contacts[1, :], self.contacts[2, :], r)
-
-        A, bu, bl = support_polytope(self.contacts)
-        self.Cch[self.i_com, 18:20] = A
-
-        self.Cch[self.i_xi, 18:20] = A
-        self.Cch[self.i_xi, 0:2] = A / omega_0
-
-        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
-        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1)))
+        l = np.vstack((self.q_min.reshape(-1, 1), self.tau_min.reshape(-1, 1)))
+        u = np.vstack((self.q_max.reshape(-1, 1), self.tau_max.reshape(-1, 1)))
         self.lch = np.tile(l, (self.N, 1))
         self.uch = np.tile(u, (self.N, 1))
 
@@ -228,18 +233,34 @@ class SwingLegCW(BaseRGCController):
         r = self.x[18:21].reshape(3,)
         dr = self.x[0:3].reshape(3,)
 
+        omega_0, _, _, _ = self.capture_point.update_geometry(self.contacts[1, :], self.contacts[2, :], r)
+        
         coeff_rcom, coeff_drcom, l_csi = self.capture_point.constraint_row()
 
         xi = self.capture_point.capture_point(r, dr)
         xi = xi.reshape(3,)
+        self.rs.xi = (xi[0:2]).reshape(2,)
         cv = self.capture_point.constraint_value(xi)
         self.capture_point.update_crossings(xi, r)
 
         self.Ccs[0, 0:3] = coeff_drcom
         self.Ccs[0, 18:21] = coeff_rcom
 
-        self.lcs = np.tile(l_csi, (self.N, 1))
-        self.ucs = np.tile(np.inf, (self.N, 1))
+        A, bu, bl = support_polytope(self.contacts)
+
+        self.Ccs[1:5, 18:20] = A
+        self.Ccs[5:, 18:20] = A
+        self.Ccs[5:, 0:2] = A / omega_0
+
+        l = np.vstack((np.array([l_csi]).reshape(-1, 1), bl.reshape(-1, 1), bl.reshape(-1, 1)))
+        u = np.vstack((np.array([np.inf]).reshape(-1, 1), bu.reshape(-1, 1), bu.reshape(-1, 1)))
+
+        self.lcs = np.tile(l, (self.N, 1))
+        self.ucs = np.tile(u, (self.N, 1))
+
+        if self.capture_point.com_crossed and not self.crossed_once:
+            self.wcs.reshape(self.N, self.ncs)[:,1:]*=100
+            self.crossed_once = True
 
         Phi_cs = np.zeros((self.ncs * self.N, self.nx + self.nu))
         Phi_cs[0:self.ncs, :] = self.Ccs @ self.Aa

@@ -107,7 +107,7 @@ class PinocchioEngine:
 
         q = np.concatenate([
             rs.b_pos,
-            rs.epsilon,  # quaternion wxyz
+            rs.epsilon,  # quaternion xyzw
             q_legs
         ])
 

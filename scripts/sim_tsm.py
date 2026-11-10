@@ -12,8 +12,8 @@ from fsm.self_righting_tsm import SelfRightingTSM
 
 class SimTSM():
 
-    def __init__(self):
-        self.max_tick = 1000
+    def __init__(self, log=False):
+        self.max_tick = 1500
 
         root_joint = pin.JointModelFreeFlyer()
         pin_model = pin.buildModelFromUrdf("sim/assets/unitree_go2/go2.urdf", root_joint)
@@ -28,6 +28,9 @@ class SimTSM():
         control = SchedulerTB(**conf_controller)
 
         self.sim = Go2Sim(mj_model=model, mj_data=data, controller=control, pin_engine=pin_engine, viewer=viewer)
+
+        self.ep_log = log
+        
         self.tsm = SelfRightingTSM()
         b0 = [2.5, 0, 1]
 
@@ -47,3 +50,16 @@ class SimTSM():
             else:
                 action = self.tsm.step(self.sim.state.robot.rpy)
             self.sim.simulation_loop(action)
+
+        if self.ep_log:
+            return self.task_success(), None, None
+        else:
+            return self.task_success(), None, None
+
+    def task_success(self):
+        flag_succes = False
+
+        if bool(np.all(self.sim.rs.foot_touching) == 1):
+            flag_succes = True
+
+        return flag_succes

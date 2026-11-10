@@ -10,6 +10,7 @@ class Go2State:
 
     epsilon: np.ndarray = field(default_factory=lambda: np.zeros(4))  # (x,y,z,w)
     omega: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    omega_b: np.ndarray = field(default_factory=lambda: np.zeros(3))
     rpy: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     q: np.ndarray = field(default_factory=lambda: np.zeros(12))
@@ -18,14 +19,25 @@ class Go2State:
     r_pos: np.ndarray = field(default_factory=lambda: np.zeros(3))
     r_vel: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
-    foot_contacts: np.ndarray = field(default_factory=lambda: np.zeros(12))
-    foot_forces: np.ndarray = field(default_factory=lambda: np.zeros(12))
+    foot_contacts: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
+    foot_forces: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
     foot_touching: np.ndarray = field(default_factory=lambda: np.zeros(4))
 
     force_mj: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
     f_com_total: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
     force_shoulder: np.ndarray = field(default_factory=lambda: np.zeros((4, 3)))
+
+    xi: np.ndarray = field(default_factory=lambda: np.zeros(2))
+    xi_cv: float = 0.0
+
+    e_r: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    e_eps: np.ndarray = field(default_factory=lambda: np.zeros(3))
+
+    eps_disc: np.ndarray = field(default_factory=lambda: np.zeros(4))
+    epsilon_c: np.ndarray = field(default_factory=lambda: np.zeros(4))  # (x,y,z,w)
+    omega_c: np.ndarray = field(default_factory=lambda: np.zeros(3))
+    omega_b_c: np.ndarray = field(default_factory=lambda: np.zeros(3))
 
 
 @dataclass

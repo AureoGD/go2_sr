@@ -4,6 +4,7 @@ from typing import Optional
 import numpy as np
 from env.normalizer import StateNormalizer
 from scipy.spatial.transform import Rotation
+from control.self_righting.rgc_mpc_solution.constraints.support_polytope import support_polytope
 
 
 class Controller(IntEnum):
@@ -32,11 +33,11 @@ class RobotStatus:
     NORMAL_MIN_LOAD = 30.0
     PREPARED_Q_CW = np.array([-1.02, 4.15, -2.20])
     PREPARED_Q_CCW = np.array([1.02, 4.15, -2.20])
-    PREPARE_JOINT_THRESHOLD = 0.2
+    PREPARE_JOINT_THRESHOLD = 0.25
     PREPARE_CONTACT_COUNT_THRESHOLD = 5
 
     PRONE_POSITION = np.array([0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7, 0.0, 1.4, -2.7])
-    PRONE_THRESHOLD = 0.5
+    PRONE_THRESHOLD = 0.2
 
     PHASE_TIMEOUT = 10.0  # seconds
 
@@ -53,8 +54,44 @@ class RobotStatus:
         self.rr_shoulder_contact_count = 0
         self.rl_shoulder_contact_count = 0
 
+        self.sw_rc = 0
+        self.sw_fc = 0
+
+        self.omega_x_lower_count = 0
+
     def set_initial_bz(self):
         self.r0 = self.rs.r_pos[2]
+
+    def compute_orientation_error(self, epsilon, terrain_normal):
+        """
+        Compute torso alignment with the terrain normal.
+
+        epsilon: quaternion (x, y, z, w)
+        terrain_normal: unit vector expressed in world frame
+
+        returns:
+            alpha: alignment in [-1, 1]
+            theta_error: angular error in radians
+        """
+
+        qx, qy, qz, qw = epsilon
+
+        R = np.array([[1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qz * qw), 2 * (qx * qz + qy * qw)],
+                      [2 * (qx * qy + qz * qw), 1 - 2 * (qx * qx + qz * qz), 2 * (qy * qz - qx * qw)],
+                      [2 * (qx * qz - qy * qw), 2 * (qy * qz + qx * qw), 1 - 2 * (qx * qx + qy * qy)]])
+
+        # Body z-axis expressed in world frame
+        z_body = R[:, 2]
+
+        # Ensure terrain normal is normalized
+        terrain_normal = terrain_normal / np.linalg.norm(terrain_normal)
+
+        alpha = np.dot(z_body, terrain_normal)
+        alpha = np.clip(alpha, -1.0, 1.0)
+
+        theta_error = np.arccos(alpha)
+
+        return alpha, theta_error
 
     @property
     def is_upside_down(self):
@@ -63,12 +100,20 @@ class RobotStatus:
 
     @property
     def roll_cw(self):
+
         rpy = self.rs.rpy
+
         R_wb = Rotation.from_euler("xyz", [rpy[0], rpy[1], rpy[2]]).as_matrix()
         g_body = R_wb.T @ np.array([0, 0, -1])
         gy = g_body[1]
 
-        return gy < 0
+        if abs(gy) < 0.01:
+            if np.rad2deg(rpy[2]) >= 0:
+                return True
+            else:
+                return False
+
+        return gy < -0.02
 
     @property
     def roll_ccw(self):
@@ -81,8 +126,23 @@ class RobotStatus:
 
     @property
     def is_upside(self):
-        alpha = self.normalizer.compute_alpha(self.rs.epsilon)
-        return alpha > 0.95
+        _, e = self.compute_orientation_error(epsilon=self.rs.epsilon, terrain_normal=self.hcs.plane_normal)
+        return e < np.deg2rad(35)
+
+    @property
+    def is_inside_polygon(self):
+        A, b, _ = support_polytope(self.rs.foot_contacts)
+        p = A @ self.rs.r_pos[0:2] < b
+        return np.all(p) == 1
+
+    @property
+    def is_com_still(self):
+        if (abs(self.rs.omega[0]) < 0.1):
+            self.omega_x_lower_count += 1
+        else:
+            self.omega_x_lower_count = 0
+
+        return self.omega_x_lower_count > 5
 
     @property
     def joints_at_safe_position(self):
@@ -154,8 +214,20 @@ class RobotStatus:
         rear = bool(self.rs.foot_touching[2])
 
         if not np.any(np.isinf(self.hcs.swing_foot_error)):
-            front |= bool(np.linalg.norm(self.hcs.swing_foot_error[0:3]) < 0.095)
-            rear |= bool(np.linalg.norm(self.hcs.swing_foot_error[3:6]) < 0.095)
+            front_e = np.linalg.norm(self.hcs.swing_foot_error[0:3])
+            rear_e = np.linalg.norm(self.hcs.swing_foot_error[3:6])
+            if front_e < 0.03:
+                self.sw_fc +=1
+                if self.sw_fc >10:
+                    front = True
+
+            if rear_e < 0.03:
+                self.sw_rc +=1
+                if self.sw_rc>10:
+                    rear = True
+
+            front |= bool(front_e) < 0.005
+            rear |= bool(rear_e) < 0.005
 
         return front and rear
 
@@ -165,8 +237,20 @@ class RobotStatus:
         rear = bool(self.rs.foot_touching[3])
 
         if not np.any(np.isinf(self.hcs.swing_foot_error)):
-            front |= bool(np.linalg.norm(self.hcs.swing_foot_error[0:3]) < 0.095)
-            rear |= bool(np.linalg.norm(self.hcs.swing_foot_error[3:6]) < 0.095)
+            front_e = np.linalg.norm(self.hcs.swing_foot_error[0:3])
+            rear_e = np.linalg.norm(self.hcs.swing_foot_error[3:6])
+            if front_e < 0.03:
+                self.sw_fc +=1
+                if self.sw_fc >10:
+                    front = True
+
+            if rear_e < 0.03:
+                self.sw_rc +=1
+                if self.sw_rc>10:
+                    rear = True
+
+            front |= bool(front_e) < 0.005
+            rear |= bool(rear_e) < 0.005
 
         return front and rear
 
@@ -180,7 +264,7 @@ class RobotStatus:
 
     @property
     def stand_finish(self):
-        return self.rs.r_pos[2] - self.r0 > 0.1
+        return self.rs.r_pos[2] - self.r0 > 0.07 and np.linalg.norm(self.rs.r_vel) < 0.01
 
 
 class SelfRightingFSM:
@@ -232,11 +316,13 @@ class SelfRightingFSM:
                     return Controller.ROLL_CCW
 
             case Controller.ROLL_CW:
-                if s.cp_com_crossed:
+                # if s.cp_com_crossed:
+                if not s.left_rear_foot_touching:
                     return Controller.SWING_LEG_CW
 
             case Controller.ROLL_CCW:
-                if s.cp_com_crossed:
+                # if s.cp_com_crossed:
+                if not s.right_rear_foot_touching:
                     return Controller.SWING_LEG_CCW
 
             case Controller.SWING_LEG_CW:
@@ -248,11 +334,13 @@ class SelfRightingFSM:
                     return Controller.SETTLE_CCW
 
             case Controller.SETTLE_CW:
-                if s.is_upside:
+                if s.is_inside_polygon:
+                    # if s.is_upside and s.is_com_still:
                     return Controller.PRONE_CW
 
             case Controller.SETTLE_CCW:
-                if s.is_upside:
+                if s.is_inside_polygon:
+                    # if s.is_upside and s.is_com_still:
                     return Controller.PRONE_CCW
 
             case Controller.PRONE_CW:

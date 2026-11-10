@@ -23,8 +23,8 @@ class SettleCW(BaseRGCController):
         self.Kd_vec = np.ones(12) * self.kd
 
         # Predic and control horizons and sampe time
-        self.N = 20
-        self.M = 20
+        self.N = 15
+        self.M = 15
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -84,15 +84,15 @@ class SettleCW(BaseRGCController):
         # ----------------------------------------
         # Weights
         # ----------------------------------------
-        Qeps = 1.75 * np.diag(np.array([1, 1, 1, 1]))
-        Qq = 0.2 * np.diag(np.array([1, 1, 1, 1]))
-        Qz = 0.75 * np.diag(np.array([1]))
+        Qeps = 0.01 * np.diag(np.array([1, 1, 1, 1]))
+        Qq = 2.5 * np.diag(np.array([1, 1, 1, 1]))
+        Qz = 0.01 * np.diag(np.array([1]))
 
         Q = block_diag(Qz, Qeps, Qq)
         self.Q = block_diag(*[Q] * self.N)
 
         # Update control action weight matrix
-        Rp = np.diag(np.array([1, 20, 20]))
+        Rp = np.diag(np.array([1, 50, 50]))
         Rs = np.diag(np.array([1, 1, 1]))
 
         R = block_diag(Rp, Rs, Rp, Rs)
@@ -126,7 +126,7 @@ class SettleCW(BaseRGCController):
         self.ncs = 20
         self.Ccs = np.zeros((self.ncs, self.nx + self.nu), dtype=np.float32)
         w_grf = np.array([0.5, 0.5, 0.5, 0.5, 0.5])
-        wcs = np.vstack((0.01 * w_grf, 1 * w_grf, 0.01 * w_grf, 1 * w_grf))
+        wcs = np.vstack((0.01 * w_grf, 5 * w_grf, 0.01 * w_grf, 5 * w_grf))
 
         self.wcs = np.tile(wcs, (self.N, 1))
 
@@ -210,7 +210,7 @@ class SettleCW(BaseRGCController):
         return aux_cons, Phi_cons
 
     def build_soft_constraint_matrices(self):
-        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts, 0.7 / np.sqrt(2))
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(self.contacts, 0.8 / np.sqrt(2))
 
         self.Ccs[:, :] = -pyramid_fric_matrix @ self.Jinv @ self.L
 

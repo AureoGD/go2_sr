@@ -10,15 +10,15 @@ OUTPUT = SCRIPT_DIR / "controller_data" / "rgc_mpc_data.npz"
 
 def main():
     sim = SimFSM(log=True)
-    b0 = [0, 0, 0.3]
+    b0 = [0, 0, 0.4]
     r0 = [np.pi, 0, 0]
     q0 = [-0.3, 1.0, -1.72, -0.5, 1.0, -1.72, 0.5, 1.40, -1.7, -0.5, 0.8, -1.5]
     sim.sim_reset(r0, b0, q0)
-    status, data, act_list = sim.run_sim()
+    status, data, act_list, task_ctr = sim.run_sim()
 
     print(status)
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(OUTPUT, b0=b0, r0=r0, q0=q0, act_list=act_list, **data)
+    np.savez_compressed(OUTPUT, b0=b0, r0=r0, q0=q0, act_list=act_list, **data, **task_ctr)
     print(f"status={status}, wrote {OUTPUT}")
 
 

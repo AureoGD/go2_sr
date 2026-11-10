@@ -9,8 +9,7 @@ def pyramid_friction_matrix(n, t1, t2, mu):
     return Cf
 
 
-def pyramid_friction(contacts, mu):
-
+def pyramid_friction(contacts, mu, R=None):
     n_contacts = contacts.shape[0]
 
     if n_contacts < 3:
@@ -26,8 +25,10 @@ def pyramid_friction(contacts, mu):
         p0 = contacts[i]
         p1 = contacts[(i + 1) % n_contacts]
         p2 = contacts[(i + 2) % n_contacts]
-
-        n, t1, t2 = contact_surfaces(p0, p1, p2)
+        if R is None:
+            n, t1, t2 = contact_surfaces(p0, p1, p2)
+        else:
+            n, t1, t2 = contact_surfaces(p0, p1, p2, ref=R)
 
         Cf_i = pyramid_friction_matrix(n, t1, t2, mu)
 

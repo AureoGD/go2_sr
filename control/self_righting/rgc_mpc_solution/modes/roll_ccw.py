@@ -16,8 +16,8 @@ class RollCCW(BaseRGCController):
         self.phase = 3
 
         # Predic and control horizons and sampe time
-        self.N = 20
-        self.M = 20
+        self.N = 15
+        self.M = 15
         self.ts = 0.01
 
         # Number of states, inputs, outputs and constarints
@@ -131,6 +131,14 @@ class RollCCW(BaseRGCController):
 
         self.omega_0 = None
 
+        # ----------------------------------------
+        # Optimization problem constants
+        # ----------------------------------------
+
+        self.eps_abs=1e-3
+        self.eps_rel=1e-3
+
+
     def update_model(self):
         x, y, z, w = self.rs.epsilon
 
@@ -216,7 +224,7 @@ class RollCCW(BaseRGCController):
 
         fric_cons_contacts = np.vstack((self.contacts[4, :], self.contacts[3, :], self.contacts[0, :]))
 
-        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(fric_cons_contacts, 0.7 / np.sqrt(2))
+        pyramid_fric_matrix, n_l, t1_l, t2_l = pyramid_friction(fric_cons_contacts, 0.8 / np.sqrt(2))
 
         self.Ccs[0:5, :] = -pyramid_fric_matrix[0:5, 0:3] @ self.Jinv[6:9, 6:9] @ self.Cch[18:21, :]
         self.Ccs[5, :] = -n_l[1] @ (self.Jinv[3:6, 3:6] @ self.Cch[15:18, :])
