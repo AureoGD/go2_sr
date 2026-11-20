@@ -1,0 +1,6 @@
+# build outputs (recreate with build.sh)
+build/
+build.configure.log
+third_party/
+*.so
+__pycache__/
